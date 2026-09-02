@@ -21,6 +21,13 @@ pub trait HarnessAdapter {
         self.root().join("config")
     }
 
+    /// Path to the main configuration file (if the harness uses a single file
+    /// rather than a directory). Defaults to `config_path()`.
+    /// Aider uses this for `.aider.conf.yml`.
+    fn config_file(&self) -> PathBuf {
+        self.config_path()
+    }
+
     /// Path to the packages directory.
     fn packages_path(&self) -> PathBuf {
         self.root().join("packages")
@@ -44,6 +51,12 @@ pub trait HarnessAdapter {
     /// Path to the extensions directory.
     fn extensions_path(&self) -> PathBuf {
         self.root().join("extensions")
+    }
+
+    /// Path to the secrets/credentials file or directory.
+    /// For Pi: `auth.json`. For Aider: `.env` or env vars.
+    fn secrets_path(&self) -> PathBuf {
+        self.root().join("secrets")
     }
 
     /// Detect an installation.
