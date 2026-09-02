@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use zeroize::Zeroize;
 
 use super::crypto;
 
@@ -28,7 +29,14 @@ impl SecretsBundle {
 
     /// Insert a secret. Overwrites any previous value for the same key.
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.entries.insert(key.into(), value.into());
+        let k = key.into();
+        let v = value.into();
+        // Validate key is a safe env var name
+        if !is_valid_env_key(&k) {
+            // Skip invalid keys rather than crashing
+            return;
+        }
+        self.entries.insert(k, v);
     }
 
     /// Get a secret by key.
@@ -109,6 +117,21 @@ impl Default for SecretsBundle {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Check if a string is a valid environment variable name.
+/// Rules: [A-Za-z_][A-Za-z0-9_]*
+fn is_valid_env_key(key: &str) -> bool {
+    if key.is_empty() {
+        return false;
+    }
+    let mut chars = key.chars();
+    // First char must be letter or underscore
+    if !matches!(chars.next(), Some('a'..='z' | 'A'..='Z' | '_')) {
+        return false;
+    }
+    // Rest must be alphanumeric or underscore
+    chars.all(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'))
 }
 
 // ── Scanning from a Pi installation ─────────────────────────────────────────
@@ -221,15 +244,26 @@ impl SecretsBundle {
             bail!("no secrets to save");
         }
 
-        let json = self.to_json()?;
+        let mut json = self.to_json()?;
         let encrypted = crypto::encrypt_secrets(passphrase, &json)
             .context("encryption failed")?;
+        // Zeroize the plaintext JSON
+        json.zeroize();
 
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         fs::write(path, &encrypted)
             .with_context(|| format!("failed to write: {}", path.display()))?;
+
+        // Set restrictive permissions (owner read/write only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = fs::Permissions::from_mode(0o600);
+            fs::set_permissions(path, perms)
+                .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+        }
 
         Ok(())
     }
@@ -242,10 +276,14 @@ impl SecretsBundle {
         let encrypted = fs::read(path)
             .with_context(|| format!("failed to read: {}", path.display()))?;
 
-        let json = crypto::decrypt_secrets(passphrase, &encrypted)
+        let mut json = crypto::decrypt_secrets(passphrase, &encrypted)
             .context("decryption failed")?;
 
-        Self::from_json(&json)
+        let result = Self::from_json(&json);
+        // Zeroize the plaintext JSON
+        json.zeroize();
+
+        result
     }
 }
 
@@ -426,5 +464,33 @@ mod tests {
         // No leading spaces, pure KEY=value
         assert!(lines.contains(&"DB_HOST=localhost".to_string()));
         assert!(lines.contains(&"DB_PORT=5432".to_string()));
+    }
+
+    // ── Env key validation tests ─────────────────────────────────────
+
+    #[test]
+    fn valid_env_keys() {
+        assert!(is_valid_env_key("API_KEY"));
+        assert!(is_valid_env_key("_SECRET"));
+        assert!(is_valid_env_key("MY_VAR_123"));
+    }
+
+    #[test]
+    fn invalid_env_keys() {
+        assert!(!is_valid_env_key(""));
+        assert!(!is_valid_env_key("123BAD"));
+        assert!(!is_valid_env_key("HAS DASH"));
+        assert!(!is_valid_env_key("PATH=/evil"));
+        assert!(!is_valid_env_key("A\nB"));
+    }
+
+    #[test]
+    fn insert_skips_invalid_keys() {
+        let mut b = SecretsBundle::new();
+        b.insert("VALID_KEY", "ok");
+        b.insert("PATH=/evil", "bad");
+        b.insert("123BAD", "bad");
+        assert_eq!(b.len(), 1);
+        assert_eq!(b.get("VALID_KEY"), Some("ok"));
     }
 }

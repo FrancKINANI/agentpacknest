@@ -118,8 +118,8 @@ pub enum Commands {
         /// Path to the bundle directory (default: current dir)
         bundle: Option<String>,
 
-        /// Passphrase for decrypting secrets
-        #[arg(short = 'p', long)]
+        /// Passphrase for decrypting secrets (WARNING: visible in process list — prefer interactive prompt)
+        #[arg(short = 'p', long, visible_alias = "pass")]
         passphrase: Option<String>,
 
         /// Working directory override for the agent

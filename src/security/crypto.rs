@@ -5,6 +5,7 @@ use aes_gcm::{
 };
 use argon2::Argon2;
 use rand::{rngs::OsRng, RngCore};
+use zeroize::Zeroize;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ pub fn encrypt_secrets(passphrase: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
     OsRng.fill_bytes(&mut salt);
     OsRng.fill_bytes(&mut nonce_bytes);
 
-    let key = derive_key(passphrase.as_bytes(), &salt)?;
+    let mut key = derive_key(passphrase.as_bytes(), &salt)?;
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| anyhow::anyhow!("cipher init failed: {}", e))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -36,6 +37,9 @@ pub fn encrypt_secrets(passphrase: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
     let ciphertext = cipher
         .encrypt(nonce, plaintext)
         .map_err(|e| anyhow::anyhow!("aes-gcm encryption failed: {}", e))?;
+
+    // Zeroize the derived key before returning
+    key.zeroize();
 
     let mut out = Vec::with_capacity(SALT_LEN + NONCE_LEN + ciphertext.len());
     out.extend_from_slice(&salt);
@@ -62,16 +66,21 @@ pub fn decrypt_secrets(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>> {
     let nonce_bytes = &encrypted[SALT_LEN..SALT_LEN + NONCE_LEN];
     let ciphertext = &encrypted[SALT_LEN + NONCE_LEN..];
 
-    let key = derive_key(passphrase.as_bytes(), salt)?;
+    let mut key = derive_key(passphrase.as_bytes(), salt)?;
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| anyhow::anyhow!("cipher init failed: {}", e))?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    cipher
+    let result = cipher
         .decrypt(nonce, ciphertext)
         .map_err(|_| anyhow::anyhow!(
             "decryption failed — wrong passphrase or corrupted data"
-        ))
+        ));
+
+    // Zeroize the derived key before returning
+    key.zeroize();
+
+    result
 }
 
 /// Prompt the user for a passphrase (masked terminal input, no echo).
@@ -101,6 +110,7 @@ fn derive_key(passphrase: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN]> {
     Argon2::default()
         .hash_password_into(passphrase, salt, &mut key)
         .map_err(|e| anyhow::anyhow!("argon2 key derivation failed: {}", e))?;
+    // Note: key is zeroized by the caller after use
     Ok(key)
 }
 

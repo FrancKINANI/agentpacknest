@@ -154,8 +154,19 @@ fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str) -> Resul
     }
 
     let mut count = 0u64;
-    let walker = walkdir::WalkDir::new(src).into_iter().filter_map(|e| e.ok());
+    let walker = walkdir::WalkDir::new(src)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok());
     for entry in walker {
+        // Reject symlinks — could point outside bundle
+        if entry.file_type().is_symlink() {
+            bail!(
+                "symlink not allowed in bundle: {}\n  hint: remove the symlink from the source",
+                entry.path().display()
+            );
+        }
+
         let rel = entry.path().strip_prefix(src).unwrap();
         let target = dst.join(rel);
 
@@ -198,9 +209,18 @@ fn copy_packages(pi: &PiInstallation, bundle_dir: &Path, force: bool) -> Result<
             }
 
             let walker = walkdir::WalkDir::new(&sub_src)
+                .follow_links(false)
                 .into_iter()
                 .filter_map(|e| e.ok());
             for entry in walker {
+                // Reject symlinks
+                if entry.file_type().is_symlink() {
+                    bail!(
+                        "symlink not allowed in bundle: {}",
+                        entry.path().display()
+                    );
+                }
+
                 let rel = entry.path().strip_prefix(&sub_src).unwrap();
                 let target = sub_dst.join(rel);
                 if entry.file_type().is_dir() {

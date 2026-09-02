@@ -41,6 +41,11 @@ pub trait HarnessAdapter {
         self.root().join("themes")
     }
 
+    /// Path to the extensions directory.
+    fn extensions_path(&self) -> PathBuf {
+        self.root().join("extensions")
+    }
+
     /// Detect an installation.
     ///
     /// Resolution order:
