@@ -2,9 +2,9 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "hh",
+    name = "pn",
     about = "Package coding agents into portable, reproducible bundles",
-    long_about = "hitchhike (hh) makes coding agents portable.\n\n\
+    long_about = "agentpacknest (pn) makes coding agents portable.\n\n\
         Take an existing coding agent (currently Pi), pack its configuration,\n\
         skills, memory, and encrypted secrets into a self-contained bundle,\n\
         then run or transfer that bundle to another machine with minimal friction.\n\n\
@@ -14,17 +14,17 @@ use clap::{Parser, Subcommand};
     propagate_version = true,
     after_help = "EXAMPLES:\n\
         \n  Initialize a bundle from a local Pi installation:\n    \
-            hh init --harness pi --path ~/.pi --name my-agent\n\
+            pn init --harness pi --path ~/.pi --name my-agent\n\
         \n  Pack config, skills, and secrets into the bundle:\n    \
-            hh pack --all --path ~/.pi\n\
+            pn pack --all --path ~/.pi\n\
         \n  Inspect the bundle:\n    \
-            hh info .\n\
+            pn info .\n\
         \n  Preview what 'run' would do:\n    \
-            hh run . --dry-run\n\
+            pn run . --dry-run\n\
         \n  Run the agent:\n    \
-            hh run .\n\
+            pn run .\n\
         \n  Inspect encrypted secrets (masked):\n    \
-            hh unlock ."
+            pn unlock ."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -36,9 +36,9 @@ pub enum Commands {
     /// Create a new agent bundle from a harness installation
     #[command(after_help = "EXAMPLES:\n\
         \n  Init with default name in current directory:\n    \
-            hh init --path ~/.pi\n\
+            pn init --path ~/.pi\n\
         \n  Init with a specific name and output directory:\n    \
-            hh init --harness pi --path ~/.pi --name my-agent --output ./bundles/my-agent")]
+            pn init --harness pi --path ~/.pi --name my-agent --output ./bundles/my-agent")]
     Init {
         /// Harness to use (currently only "pi")
         #[arg(long, default_value = "pi")]
@@ -60,13 +60,13 @@ pub enum Commands {
     /// Copy files from a harness installation into the bundle
     #[command(after_help = "EXAMPLES:\n\
         \n  Pack everything (config + memory + skills + secrets):\n    \
-            hh pack --all --path ~/.pi\n\
+            pn pack --all --path ~/.pi\n\
         \n  Pack only config and skills:\n    \
-            hh pack --with-config --with-skills --path ~/.pi\n\
+            pn pack --with-config --with-skills --path ~/.pi\n\
         \n  Pack and create a .tar.gz archive:\n    \
-            hh pack --all --archive --path ~/.pi\n\
+            pn pack --all --archive --path ~/.pi\n\
         \n  Force overwrite existing files:\n    \
-            hh pack --with-config --path ~/.pi --force")]
+            pn pack --with-config --path ~/.pi --force")]
     Pack {
         /// Path to the bundle directory (default: current dir)
         bundle: Option<String>,
@@ -111,13 +111,13 @@ pub enum Commands {
     /// Launch the agent defined in the bundle
     #[command(after_help = "EXAMPLES:\n\
         \n  Run with default settings:\n    \
-            hh run .\n\
+            pn run .\n\
         \n  Preview without executing:\n    \
-            hh run . --dry-run\n\
+            pn run . --dry-run\n\
         \n  Run with a custom working directory:\n    \
-            hh run . --workdir /tmp/agent-workspace\n\
+            pn run . --workdir /tmp/agent-workspace\n\
         \n  Pass the passphrase via flag (less secure):\n    \
-            hh run . --passphrase my-secret")]
+            pn run . --passphrase my-secret")]
     Run {
         /// Path to the bundle directory (default: current dir)
         bundle: Option<String>,
@@ -142,9 +142,9 @@ pub enum Commands {
     /// Compare a bundle with the local harness state
     #[command(after_help = "EXAMPLES:\n\
         \n  Compare current bundle with local Pi:\n    \
-            hh diff .\n\
+            pn diff .\n\
         \n  Compare with a specific harness path:\n    \
-            hh diff . --path ~/.pi/agent")]
+            pn diff . --path ~/.pi/agent")]
     Diff {
         /// Path to the bundle directory (default: current dir)
         bundle: Option<String>,
@@ -157,9 +157,9 @@ pub enum Commands {
     /// Display bundle metadata and contents
     #[command(after_help = "EXAMPLES:\n\
         \n  Show info for current directory:\n    \
-            hh info .\n\
+            pn info .\n\
         \n  Show info for a specific bundle:\n    \
-            hh info ./bundles/my-agent")]
+            pn info ./bundles/my-agent")]
     Info {
         /// Path to the bundle directory (default: current dir)
         #[arg(default_value = ".")]
@@ -169,11 +169,11 @@ pub enum Commands {
     /// Decrypt and inspect secrets stored in the bundle
     #[command(after_help = "EXAMPLES:\n\
         \n  Show secrets with masked values:\n    \
-            hh unlock .\n\
+            pn unlock .\n\
         \n  Show full secret values:\n    \
-            hh unlock . --show\n\
+            pn unlock . --show\n\
         \n  Output as KEY=value for sourcing:\n    \
-            hh unlock . --env")]
+            pn unlock . --env")]
     Unlock {
         /// Path to the bundle directory (default: current dir)
         bundle: Option<String>,
@@ -190,9 +190,9 @@ pub enum Commands {
     /// Change the passphrase for encrypted secrets without re-packing
     #[command(after_help = "EXAMPLES:\n\
         \n  Rotate passphrase for current bundle:\n    \
-            hh rekey .\n\
+            pn rekey .\n\
         \n  Rotate passphrase for a specific bundle:\n    \
-            hh rekey ./bundles/my-agent")]
+            pn rekey ./bundles/my-agent")]
     Rekey {
         /// Path to the bundle directory (default: current dir)
         bundle: Option<String>,

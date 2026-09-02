@@ -21,7 +21,7 @@ pub struct Manifest {
     pub launch: Launch,
     pub security: Security,
     pub integrity: Integrity,
-    /// Snapshot provenance — populated by `hh pack`.
+    /// Snapshot provenance — populated by `pn pack`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<OriginMeta>,
 }
@@ -149,12 +149,12 @@ pub struct Integrity {
 /// plus a hash of the source harness state at pack time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OriginMeta {
-    /// Hostname of the machine where `hh pack` was run.
+    /// Hostname of the machine where `pn pack` was run.
     pub origin_machine: String,
-    /// ISO 8601 timestamp of when `hh pack` was run.
+    /// ISO 8601 timestamp of when `pn pack` was run.
     pub packed_at: String,
     /// SHA-256 hash of the harness source state at pack time.
-    /// Used by `hh diff` to detect drift.
+    /// Used by `pn diff` to detect drift.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_state_hash: Option<String>,
 }
@@ -164,6 +164,7 @@ pub struct OriginMeta {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
 pub enum ValidationError {
     #[error("unsupported schema_version: expected {SCHEMA_VERSION}, got {0}")]
     UnsupportedVersion(String),
@@ -191,8 +192,7 @@ pub fn load(path: &Path) -> Result<Manifest> {
 
 /// Save a manifest to a YAML file on disk.
 pub fn save(path: &Path, manifest: &Manifest) -> Result<()> {
-    let yaml = serde_yaml::to_string(manifest)
-        .context("failed to serialize manifest")?;
+    let yaml = serde_yaml::to_string(manifest).context("failed to serialize manifest")?;
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
@@ -215,7 +215,7 @@ pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
             id: uuid_v4(),
             created_at: now_iso8601(),
             created_by: whoami(),
-            description: Some(format!("Agent bundle for harness pi")),
+            description: Some("Agent bundle for harness pi".to_string()),
         },
         harness: HarnessMeta {
             name: "pi".to_string(),
@@ -240,7 +240,7 @@ pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
             }],
         },
         launch: Launch {
-            command: "hh run .".to_string(),
+            command: "pn run .".to_string(),
             working_directory: Some(".".to_string()),
         },
         security: Security {
@@ -265,7 +265,7 @@ impl Manifest {
         // Schema version check
         if self.schema_version != SCHEMA_VERSION {
             bail!(
-                "unsupported schema_version: expected '{}', got '{}'\n  hint: this bundle was created with a different version of hh",
+                "unsupported schema_version: expected '{}', got '{}'\n  hint: this bundle was created with a different version of pn",
                 SCHEMA_VERSION, self.schema_version
             );
         }
@@ -294,16 +294,14 @@ impl Manifest {
         let known_harnesses = ["pi"];
         if !known_harnesses.contains(&self.harness.name.as_str()) {
             bail!(
-                "unknown harness '{}'\n  supported harnesses: {}\n  hint: only 'pi' is supported in hh v0.1",
+                "unknown harness '{}'\n  supported harnesses: {}\n  hint: only 'pi' is supported in pn v0.1",
                 self.harness.name,
                 known_harnesses.join(", ")
             );
         }
 
         // UUID format check (basic — 36 chars with hyphens)
-        if self.bundle.id.len() != 36
-            || self.bundle.id.chars().filter(|c| *c == '-').count() != 4
-        {
+        if self.bundle.id.len() != 36 || self.bundle.id.chars().filter(|c| *c == '-').count() != 4 {
             bail!(
                 "bundle.id '{}' does not look like a valid UUID\n  expected format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx",
                 self.bundle.id
@@ -397,6 +395,7 @@ fn whoami() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
+#[allow(dead_code)]
 fn hostname() -> String {
     #[cfg(unix)]
     {
@@ -459,7 +458,7 @@ mod tests {
                 }],
             },
             launch: Launch {
-                command: "hh run .".to_string(),
+                command: "pn run .".to_string(),
                 working_directory: Some(".".to_string()),
             },
             security: Security {

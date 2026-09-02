@@ -1,24 +1,24 @@
 //! Bundle signing with ed25519.
 //!
-//! Each user has a keypair stored at `~/.config/hitchhike/keypair`.
-//! - `hh pack` signs the manifest YAML bytes with the private key.
-//! - `hh info` and `hh run` verify the signature.
+//! Each user has a keypair stored at `~/.config/agentpacknest/keypair`.
+//! - `pn pack` signs the manifest YAML bytes with the private key.
+//! - `pn info` and `pn run` verify the signature.
 //!
 //! The signature is stored as `secrets/signature.bin` alongside the bundle.
 //! This is NOT a security boundary — it's a tamper-evident seal.
 
 use anyhow::{bail, Context, Result};
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey, Signature};
+use ed25519_dalek::Verifier;
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use std::fs;
 use std::path::{Path, PathBuf};
-use ed25519_dalek::Verifier;
 
-/// Directory where hitchhike stores its config (keypair, etc.).
+/// Directory where agentpacknest stores its config (keypair, etc.).
 fn config_dir() -> Result<PathBuf> {
     let base = dirs::config_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
         .context("could not determine config directory")?;
-    Ok(base.join("hitchhike"))
+    Ok(base.join("agentpacknest"))
 }
 
 /// Path to the signing keypair file.
@@ -28,6 +28,7 @@ fn keypair_path() -> Result<PathBuf> {
 
 /// Generate a new signing keypair and save it to disk.
 /// Returns the verifying (public) key bytes.
+#[allow(dead_code)]
 pub fn generate_keypair() -> Result<[u8; 32]> {
     let dir = config_dir()?;
     fs::create_dir_all(&dir)
@@ -63,11 +64,18 @@ pub fn generate_keypair() -> Result<[u8; 32]> {
 /// Load the signing keypair from disk.
 fn load_signing_key() -> Result<SigningKey> {
     let path = keypair_path()?;
-    let seed = fs::read(&path)
-        .with_context(|| format!("failed to read keypair: {}\n  hint: run `hh init` to generate one", path.display()))?;
+    let seed = fs::read(&path).with_context(|| {
+        format!(
+            "failed to read keypair: {}\n  hint: run `pn init` to generate one",
+            path.display()
+        )
+    })?;
 
     if seed.len() != 32 {
-        bail!("invalid keypair file: expected 32 bytes, got {}", seed.len());
+        bail!(
+            "invalid keypair file: expected 32 bytes, got {}",
+            seed.len()
+        );
     }
 
     let mut bytes = [0u8; 32];
@@ -91,10 +99,16 @@ pub fn sign(data: &[u8]) -> Result<Vec<u8>> {
 /// Verify a signature against data and a public key.
 pub fn verify(data: &[u8], signature_bytes: &[u8], public_key_bytes: &[u8]) -> Result<bool> {
     if public_key_bytes.len() != 32 {
-        bail!("invalid public key: expected 32 bytes, got {}", public_key_bytes.len());
+        bail!(
+            "invalid public key: expected 32 bytes, got {}",
+            public_key_bytes.len()
+        );
     }
     if signature_bytes.len() != 64 {
-        bail!("invalid signature: expected 64 bytes, got {}", signature_bytes.len());
+        bail!(
+            "invalid signature: expected 64 bytes, got {}",
+            signature_bytes.len()
+        );
     }
 
     let mut key_bytes = [0u8; 32];
@@ -131,8 +145,7 @@ pub fn save_signature(path: &Path, sig: &[u8]) -> Result<()> {
 
 /// Load a signature from a file.
 pub fn load_signature(path: &Path) -> Result<Vec<u8>> {
-    fs::read(path)
-        .with_context(|| format!("failed to read signature: {}", path.display()))
+    fs::read(path).with_context(|| format!("failed to read signature: {}", path.display()))
 }
 
 #[cfg(test)]

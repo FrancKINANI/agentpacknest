@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Aider path resolution.
 //!
 //! Aider's file layout per project:
@@ -25,7 +26,7 @@
 //! - Pi: config is `settings.json` (JSON) in a central agent dir
 //! - Aider: config is `.aider.conf.yml` (YAML) per project
 //!
-//! - Pi: secrets in `auth.json` (JSON, encrypted by hitchhike)
+//! - Pi: secrets in `auth.json` (JSON, encrypted by agentpacknest)
 //! - Aider: secrets in `.env` (plaintext) or env vars
 //!
 //! - Pi: history in `sessions/` dir (structured .jsonl)
@@ -108,7 +109,10 @@ mod tests {
         assert_eq!(paths.config_file(), dir.path().join(".aider.conf.yml"));
         assert_eq!(paths.env_file(), dir.path().join(".env"));
         assert_eq!(paths.cache_dir(), dir.path().join(".aider"));
-        assert_eq!(paths.chat_history(), dir.path().join(".aider.chat.history.md"));
+        assert_eq!(
+            paths.chat_history(),
+            dir.path().join(".aider.chat.history.md")
+        );
         assert_eq!(paths.conventions(), dir.path().join("CONVENTIONS.md"));
     }
 

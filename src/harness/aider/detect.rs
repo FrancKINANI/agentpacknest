@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Aider harness detection.
 //!
 //! Aider (https://aider.chat) is a command-line coding agent that works
@@ -132,9 +133,8 @@ impl HarnessAdapter for AiderInstallation {
         let version = get_aider_version(&binary)?;
 
         // 3. Resolve project directory
-        let project_dir = path.unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+        let project_dir =
+            path.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
         Ok(Self {
             binary,

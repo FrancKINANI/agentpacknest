@@ -40,6 +40,7 @@ impl SecretsBundle {
     }
 
     /// Get a secret by key.
+    #[allow(dead_code)]
     pub fn get(&self, key: &str) -> Option<&str> {
         self.entries.get(key).map(|s| s.as_str())
     }
@@ -233,8 +234,8 @@ impl SecretsBundle {
             return Ok(());
         }
 
-        for entry in fs::read_dir(dir)
-            .with_context(|| format!("failed to read: {}", dir.display()))?
+        for entry in
+            fs::read_dir(dir).with_context(|| format!("failed to read: {}", dir.display()))?
         {
             let entry = entry?;
             let path = entry.path();
@@ -277,8 +278,7 @@ impl SecretsBundle {
         }
 
         let mut json = self.to_json()?;
-        let encrypted = crypto::encrypt_secrets(passphrase, &json)
-            .context("encryption failed")?;
+        let encrypted = crypto::encrypt_secrets(passphrase, &json).context("encryption failed")?;
         // Zeroize the plaintext JSON
         json.zeroize();
 
@@ -305,11 +305,11 @@ impl SecretsBundle {
     /// Returns an error if the file doesn't exist, is corrupted,
     /// or the passphrase is wrong.
     pub fn load_decrypted(path: &Path, passphrase: &str) -> Result<Self> {
-        let encrypted = fs::read(path)
-            .with_context(|| format!("failed to read: {}", path.display()))?;
+        let encrypted =
+            fs::read(path).with_context(|| format!("failed to read: {}", path.display()))?;
 
-        let mut json = crypto::decrypt_secrets(passphrase, &encrypted)
-            .context("decryption failed")?;
+        let mut json =
+            crypto::decrypt_secrets(passphrase, &encrypted).context("decryption failed")?;
 
         let result = Self::from_json(&json);
         // Zeroize the plaintext JSON

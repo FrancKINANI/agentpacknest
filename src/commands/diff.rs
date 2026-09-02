@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::manifest;
 
-/// Execute `hh diff`.
+/// Execute `pn diff`.
 pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> {
     // ── 1. Resolve bundle ──────────────────────────────────────────
     let bundle_dir = match bundle_path {
@@ -16,17 +16,22 @@ pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> 
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "no manifest.yaml found in {}\n  hint: not a valid hitchhike bundle",
+            "no manifest.yaml found in {}\n  hint: not a valid agentpacknest bundle",
             bundle_dir.display()
         );
     }
 
-    let m = manifest::load(&manifest_path)
-        .context("failed to load manifest")?;
+    let m = manifest::load(&manifest_path).context("failed to load manifest")?;
 
     println!("Bundle:   {}", m.bundle.name);
-    println!("Packed:   {}", m.origin.as_ref().map_or("(unknown)", |o| &o.packed_at));
-    println!("Machine:  {}", m.origin.as_ref().map_or("(unknown)", |o| &o.origin_machine));
+    println!(
+        "Packed:   {}",
+        m.origin.as_ref().map_or("(unknown)", |o| &o.packed_at)
+    );
+    println!(
+        "Machine:  {}",
+        m.origin.as_ref().map_or("(unknown)", |o| &o.origin_machine)
+    );
     println!();
 
     // ── 2. Resolve harness source ──────────────────────────────────
@@ -63,18 +68,35 @@ pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> 
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
 
-    let in_both: Vec<&String> = bundle_rels.iter().filter(|b| harness_rels.contains(*b)).collect();
-    let only_in_bundle: Vec<&String> = bundle_rels.iter().filter(|b| !harness_rels.contains(*b)).collect();
-    let only_in_harness: Vec<&String> = harness_rels.iter().filter(|h| !bundle_rels.contains(*h)).collect();
+    let in_both: Vec<&String> = bundle_rels
+        .iter()
+        .filter(|b| harness_rels.contains(*b))
+        .collect();
+    let only_in_bundle: Vec<&String> = bundle_rels
+        .iter()
+        .filter(|b| !harness_rels.contains(*b))
+        .collect();
+    let only_in_harness: Vec<&String> = harness_rels
+        .iter()
+        .filter(|h| !bundle_rels.contains(*h))
+        .collect();
 
     let mut changed = Vec::new();
-    for rel in &in_both {
+    for rel in in_both {
         // Find the full paths and compare content
         let bundle_file = bundle_files.iter().find(|p| {
-            p.strip_prefix(&bundle_dir).ok().map(|r| r.to_string_lossy().into_owned()).as_deref() == Some(rel.as_str())
+            p.strip_prefix(&bundle_dir)
+                .ok()
+                .map(|r| r.to_string_lossy().into_owned())
+                .as_deref()
+                == Some(rel.as_str())
         });
         let harness_file = harness_files.iter().find(|p| {
-            p.strip_prefix(&harness_path).ok().map(|r| r.to_string_lossy().into_owned()).as_deref() == Some(rel.as_str())
+            p.strip_prefix(&harness_path)
+                .ok()
+                .map(|r| r.to_string_lossy().into_owned())
+                .as_deref()
+                == Some(rel.as_str())
         });
 
         if let (Some(bf), Some(hf)) = (bundle_file, harness_file) {
@@ -94,9 +116,13 @@ pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> 
 
     let mut has_diff = false;
 
+    let symbol_changed = "\u{2260}";
+    let symbol_only_bundle = "\u{2212}";
+    let symbol_only_harness = "+";
+
     if !changed.is_empty() {
         has_diff = true;
-        println!("  {} Modified files:", "≠".to_string());
+        println!("  {} Modified files:", symbol_changed);
         for f in &changed {
             println!("    {}", f);
         }
@@ -105,7 +131,10 @@ pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> 
 
     if !only_in_bundle.is_empty() {
         has_diff = true;
-        println!("  {} Only in bundle (removed from harness):", "−".to_string());
+        println!(
+            "  {} Only in bundle (removed from harness):",
+            symbol_only_bundle
+        );
         for f in &only_in_bundle {
             println!("    {}", f);
         }
@@ -114,7 +143,7 @@ pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> 
 
     if !only_in_harness.is_empty() {
         has_diff = true;
-        println!("  {} Only in harness (not packed):", "+".to_string());
+        println!("  {} Only in harness (not packed):", symbol_only_harness);
         for f in &only_in_harness {
             println!("    {}", f);
         }
@@ -123,7 +152,7 @@ pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> 
 
     if has_diff {
         println!("Bundle and local harness have diverged.");
-        println!("hint: re-run `hh pack` to update the bundle, or use `--force` to ignore.");
+        println!("hint: re-run `pn pack` to update the bundle, or use `--force` to ignore.");
     }
 
     Ok(())
@@ -139,19 +168,27 @@ fn resolve_harness_path(harness_name: &str) -> Result<PathBuf> {
             // Check PI_CODING_AGENT_DIR, then ~/.pi/agent, then PI_HOME, then ~/.pi
             if let Ok(val) = std::env::var("PI_CODING_AGENT_DIR") {
                 let p = PathBuf::from(&val);
-                if p.is_dir() { return Ok(p); }
+                if p.is_dir() {
+                    return Ok(p);
+                }
             }
             if let Some(home) = dirs::home_dir() {
                 let p = home.join(".pi").join("agent");
-                if p.is_dir() { return Ok(p); }
+                if p.is_dir() {
+                    return Ok(p);
+                }
             }
             if let Ok(val) = std::env::var("PI_HOME") {
                 let p = PathBuf::from(&val);
-                if p.is_dir() { return Ok(p); }
+                if p.is_dir() {
+                    return Ok(p);
+                }
             }
             if let Some(home) = dirs::home_dir() {
                 let p = home.join(".pi");
-                if p.is_dir() { return Ok(p); }
+                if p.is_dir() {
+                    return Ok(p);
+                }
             }
             bail!("could not find Pi installation\n  hint: pass --path explicitly")
         }

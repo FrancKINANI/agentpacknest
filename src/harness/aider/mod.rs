@@ -1,3 +1,3 @@
 pub mod detect;
-pub mod paths;
 pub mod launch;
+pub mod paths;

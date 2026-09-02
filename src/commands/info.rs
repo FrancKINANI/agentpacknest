@@ -5,16 +5,11 @@ use crate::core::manifest;
 use crate::security::signing;
 
 /// Verify the manifest signature against the bundle's manifest.sig.
-fn verify_signature(
-    manifest_path: &Path,
-    sig_path: &Path,
-) -> Result<bool> {
-    let manifest_bytes = std::fs::read(manifest_path)
-        .context("failed to read manifest for verification")?;
-    let sig_bytes = signing::load_signature(sig_path)
-        .context("failed to load signature")?;
-    let vk = signing::load_verifying_key()
-        .context("failed to load verifying key")?;
+fn verify_signature(manifest_path: &Path, sig_path: &Path) -> Result<bool> {
+    let manifest_bytes =
+        std::fs::read(manifest_path).context("failed to read manifest for verification")?;
+    let sig_bytes = signing::load_signature(sig_path).context("failed to load signature")?;
+    let vk = signing::load_verifying_key().context("failed to load verifying key")?;
 
     signing::verify(&manifest_bytes, &sig_bytes, &vk.to_bytes())
         .context("signature verification failed")
@@ -33,13 +28,12 @@ pub fn execute(bundle: String) -> Result<()> {
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "no manifest.yaml found in {}\n  hint: this doesn't look like an hitchhike bundle",
+            "no manifest.yaml found in {}\n  hint: this doesn't look like an agentpacknest bundle",
             bundle
         );
     }
 
-    let m = manifest::load(&manifest_path)
-        .context("failed to load manifest")?;
+    let m = manifest::load(&manifest_path).context("failed to load manifest")?;
 
     // ── Header ──────────────────────────────────────────────────────
     println!();
@@ -146,7 +140,11 @@ pub fn execute(bundle: String) -> Result<()> {
 }
 
 fn flag(v: bool) -> &'static str {
-    if v { "yes" } else { "no" }
+    if v {
+        "yes"
+    } else {
+        "no"
+    }
 }
 
 fn print_package_list(label: &str, entries: &[manifest::PackageEntry]) {

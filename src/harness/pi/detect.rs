@@ -173,6 +173,7 @@ impl HarnessAdapter for PiInstallation {
 
 // ── Pi-specific methods ──────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 impl PiInstallation {
     /// Path to `auth.json` (API keys, OAuth tokens).
     pub fn auth_path(&self) -> PathBuf {
@@ -401,7 +402,11 @@ mod tests {
     #[test]
     fn read_version_from_settings() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("settings.json"), "{\n  \"version\": \"1.2.3\"\n}").unwrap();
+        fs::write(
+            dir.path().join("settings.json"),
+            "{\n  \"version\": \"1.2.3\"\n}",
+        )
+        .unwrap();
         fs::create_dir_all(dir.path().join("sessions")).unwrap();
 
         assert_eq!(PiInstallation::read_version(dir.path()), "1.2.3");

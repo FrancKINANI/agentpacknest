@@ -1,12 +1,12 @@
 [package]
-name = "hitchhike"
+name = "agentpacknest"
 version = "0.1.0"
 edition = "2021"
 description = "Package coding agents into portable, reproducible bundles"
 license = "MIT"
 
 [[bin]]
-name = "hh"
+name = "pn"
 path = "src/main.rs"
 
 [dependencies]

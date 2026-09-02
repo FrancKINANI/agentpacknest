@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 /// Each harness (pi, desktop, etc.) implements this trait to provide
 /// a uniform interface for detecting, configuring, and interacting
 /// with an installation.
+#[allow(dead_code)]
 pub trait HarnessAdapter {
     /// The human-readable name of this harness (e.g. "pi", "desktop").
     fn name(&self) -> &str;

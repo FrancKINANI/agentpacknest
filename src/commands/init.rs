@@ -15,15 +15,14 @@ pub fn execute(
     // ── 1. Validate harness ────────────────────────────────────────
     if harness != "pi" {
         bail!(
-            "unsupported harness: `{}`\n  supported harnesses: pi\n  hint: only 'pi' is available in hh v0.1",
+            "unsupported harness: `{}`\n  supported harnesses: pi\n  hint: only 'pi' is available in pn v0.1",
             harness
         );
     }
 
     // ── 2. Detect Pi installation ──────────────────────────────────
     let pi_path = path.map(PathBuf::from);
-    let pi = PiInstallation::detect(pi_path)
-        .context("failed to detect Pi installation")?;
+    let pi = PiInstallation::detect(pi_path).context("failed to detect Pi installation")?;
 
     println!("Detected Pi v{}", pi.version());
 
@@ -54,8 +53,9 @@ pub fn execute(
     ];
 
     for dir in &dirs {
-        fs::create_dir_all(out_dir.join(dir))
-            .with_context(|| format!("failed to create directory: {}/{}", out_dir.display(), dir))?;
+        fs::create_dir_all(out_dir.join(dir)).with_context(|| {
+            format!("failed to create directory: {}/{}", out_dir.display(), dir)
+        })?;
     }
 
     println!("Created bundle structure in {}/", out_dir.display());
@@ -77,8 +77,7 @@ pub fn execute(
     }
 
     let manifest_path = out_dir.join("manifest.yaml");
-    manifest::save(&manifest_path, &m)
-        .context("failed to write manifest.yaml")?;
+    manifest::save(&manifest_path, &m).context("failed to write manifest.yaml")?;
 
     println!("Wrote manifest.yaml");
 
@@ -90,7 +89,7 @@ pub fn execute(
     println!();
     println!("Next steps:");
     println!("  cd {}", out_dir.display());
-    println!("  hh info .");
+    println!("  pn info .");
     println!();
 
     Ok(())

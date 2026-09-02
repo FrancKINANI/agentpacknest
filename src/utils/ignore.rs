@@ -1,6 +1,6 @@
-//! `.hitchhikeignore` file support.
+//! `.agentpacknestignore` file support.
 //!
-//! Reads a `.hitchhikeignore` file (same syntax as `.gitignore`) and provides
+//! Reads a `.agentpacknestignore` file (same syntax as `.gitignore`) and provides
 //! a method to check if a relative path should be excluded from packing.
 //!
 //! Patterns are matched against the relative path within the source directory.
@@ -9,17 +9,17 @@
 use std::fs;
 use std::path::Path;
 
-/// A set of ignore patterns parsed from a `.hitchhikeignore` file.
+/// A set of ignore patterns parsed from a `.agentpacknestignore` file.
 #[derive(Debug, Clone, Default)]
 pub struct IgnorePatterns {
     patterns: Vec<String>,
 }
 
 impl IgnorePatterns {
-    /// Load patterns from a `.hitchhikeignore` file.
+    /// Load patterns from a `.agentpacknestignore` file.
     /// Returns an empty pattern set if the file doesn't exist.
     pub fn load(dir: &Path) -> Self {
-        let path = dir.join(".hitchhikeignore");
+        let path = dir.join(".agentpacknestignore");
         if !path.is_file() {
             return Self::default();
         }
@@ -79,10 +79,8 @@ impl IgnorePatterns {
             }
 
             // Contains match: any path segment matches a bare name
-            if !pat.contains('/') && !pat.contains('*') {
-                if path.split('/').any(|seg| seg == pat) {
-                    return true;
-                }
+            if !pat.contains('/') && !pat.contains('*') && path.split('/').any(|seg| seg == pat) {
+                return true;
             }
         }
 

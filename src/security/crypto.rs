@@ -1,8 +1,8 @@
-use anyhow::{bail, Result};
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
+use anyhow::{bail, Result};
 use argon2::Argon2;
 use rand::{rngs::OsRng, RngCore};
 use zeroize::Zeroize;
@@ -57,7 +57,8 @@ pub fn decrypt_secrets(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>> {
     if encrypted.len() < min_len {
         bail!(
             "encrypted data too short: {} bytes (minimum {})",
-            encrypted.len(), min_len
+            encrypted.len(),
+            min_len
         );
     }
 
@@ -72,9 +73,7 @@ pub fn decrypt_secrets(passphrase: &str, encrypted: &[u8]) -> Result<Vec<u8>> {
 
     let result = cipher
         .decrypt(nonce, ciphertext)
-        .map_err(|_| anyhow::anyhow!(
-            "decryption failed — wrong passphrase or corrupted data"
-        ));
+        .map_err(|_| anyhow::anyhow!("decryption failed — wrong passphrase or corrupted data"));
 
     // Zeroize the derived key before returning
     key.zeroize();
@@ -115,7 +114,7 @@ fn derive_key(passphrase: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN]> {
 
 // ── KEK/DEK Envelope ────────────────────────────────────────────────────────
 //
-// For passphrase rotation (hh rekey), we use a two-layer scheme:
+// For passphrase rotation (pn rekey), we use a two-layer scheme:
 //   KEK (key encryption key) = derived from passphrase
 //   DEK (data encryption key) = random 32 bytes
 //
@@ -124,6 +123,7 @@ fn derive_key(passphrase: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN]> {
 // Changing passphrase = re-encrypt DEK with new KEK, data untouched.
 
 /// Generate a random DEK (data encryption key).
+#[allow(dead_code)]
 pub fn generate_dek() -> Result<[u8; KEY_LEN]> {
     let mut dek = [0u8; KEY_LEN];
     OsRng.fill_bytes(&mut dek);
@@ -131,9 +131,10 @@ pub fn generate_dek() -> Result<[u8; KEY_LEN]> {
 }
 
 /// Encrypt data using a DEK directly (no passphrase involved).
+#[allow(dead_code)]
 pub fn encrypt_with_dek(dek: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
-    let cipher = Aes256Gcm::new_from_slice(dek)
-        .map_err(|e| anyhow::anyhow!("cipher init failed: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(dek).map_err(|e| anyhow::anyhow!("cipher init failed: {}", e))?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -149,6 +150,7 @@ pub fn encrypt_with_dek(dek: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>
 }
 
 /// Decrypt data using a DEK directly.
+#[allow(dead_code)]
 pub fn decrypt_with_dek(dek: &[u8; KEY_LEN], encrypted: &[u8]) -> Result<Vec<u8>> {
     if encrypted.len() < NONCE_LEN + 1 {
         bail!("encrypted data too short");
@@ -156,8 +158,8 @@ pub fn decrypt_with_dek(dek: &[u8; KEY_LEN], encrypted: &[u8]) -> Result<Vec<u8>
     let nonce_bytes = &encrypted[..NONCE_LEN];
     let ciphertext = &encrypted[NONCE_LEN..];
 
-    let cipher = Aes256Gcm::new_from_slice(dek)
-        .map_err(|e| anyhow::anyhow!("cipher init failed: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(dek).map_err(|e| anyhow::anyhow!("cipher init failed: {}", e))?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
     cipher
@@ -166,6 +168,7 @@ pub fn decrypt_with_dek(dek: &[u8; KEY_LEN], encrypted: &[u8]) -> Result<Vec<u8>
 }
 
 /// Encrypt a DEK with a passphrase (wraps the DEK in a KEK envelope).
+#[allow(dead_code)]
 pub fn wrap_dek(passphrase: &str, dek: &[u8; KEY_LEN]) -> Result<Vec<u8>> {
     let mut salt = [0u8; SALT_LEN];
     OsRng.fill_bytes(&mut salt);
@@ -181,6 +184,7 @@ pub fn wrap_dek(passphrase: &str, dek: &[u8; KEY_LEN]) -> Result<Vec<u8>> {
 }
 
 /// Unwrap a DEK from a KEK envelope using a passphrase.
+#[allow(dead_code)]
 pub fn unwrap_dek(passphrase: &str, wrapped: &[u8]) -> Result<[u8; KEY_LEN]> {
     if wrapped.len() < SALT_LEN + NONCE_LEN + 1 {
         bail!("wrapped DEK too short");
@@ -202,6 +206,7 @@ pub fn unwrap_dek(passphrase: &str, wrapped: &[u8]) -> Result<[u8; KEY_LEN]> {
 
 /// Create a full KEK/DEK envelope: encrypt data with a random DEK, then wrap the DEK.
 /// Returns: [wrapped_dek][encrypted_data]
+#[allow(dead_code)]
 pub fn encrypt_envelope(passphrase: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
     let dek = generate_dek()?;
     let encrypted_data = encrypt_with_dek(&dek, plaintext)?;
@@ -216,6 +221,7 @@ pub fn encrypt_envelope(passphrase: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Decrypt a full KEK/DEK envelope.
+#[allow(dead_code)]
 pub fn decrypt_envelope(passphrase: &str, envelope: &[u8]) -> Result<Vec<u8>> {
     // The wrapped DEK is: 16B salt + 12B nonce + 32B plaintext + 16B tag = 76 bytes
     let wrapped_len = SALT_LEN + NONCE_LEN + KEY_LEN + 16;

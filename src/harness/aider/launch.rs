@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Aider launch configuration.
 //!
 //! # How Aider is launched
@@ -12,7 +13,7 @@
 //! # With files
 //! aider file1.py file2.py
 //!
-//! # Non-interactive (for hitchhike)
+//! # Non-interactive (for agentpacknest)
 //! aider --yes --message "fix the bug" --file src/main.py
 //! ```
 //!
@@ -26,7 +27,7 @@
 //! - `OPENROUTER_API_KEY` — OpenRouter API key
 //!
 //! These are typically set via `.env` file or shell environment.
-//! hitchhike should decrypt secrets and inject them as env vars.
+//! agentpacknest should decrypt secrets and inject them as env vars.
 //!
 //! # Key differences from Pi
 //!
@@ -36,7 +37,7 @@
 //! - Pi: needs Node.js >= 20
 //! - Aider: needs Python >= 3.8, pip-installed
 //!
-//! - Pi: env cleared + hitchhike vars injected
+//! - Pi: env cleared + agentpacknest vars injected
 //! - Aider: env cleared + API key vars injected (from .env or encrypted secrets)
 
 use std::path::Path;

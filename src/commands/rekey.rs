@@ -1,11 +1,11 @@
 use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::core::manifest;
 use crate::security::crypto;
 use crate::security::secrets::SecretsBundle;
 
-/// Execute `hh rekey`.
+/// Execute `pn rekey`.
 pub fn execute(bundle_path: Option<String>) -> Result<()> {
     // ── 1. Resolve bundle ──────────────────────────────────────────
     let bundle_dir = match bundle_path {
@@ -23,14 +23,13 @@ pub fn execute(bundle_path: Option<String>) -> Result<()> {
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "no manifest.yaml found in {}\n  hint: this doesn't look like a hitchhike bundle",
+            "no manifest.yaml found in {}\n  hint: this doesn't look like a agentpacknest bundle",
             bundle_dir.display()
         );
     }
 
     // ── 2. Load manifest ──────────────────────────────────────────
-    let m = manifest::load(&manifest_path)
-        .context("failed to load manifest")?;
+    let m = manifest::load(&manifest_path).context("failed to load manifest")?;
 
     if !m.security.secrets_encrypted {
         bail!(
@@ -42,7 +41,7 @@ pub fn execute(bundle_path: Option<String>) -> Result<()> {
     let enc_path = bundle_dir.join("secrets/keys.enc");
     if !enc_path.is_file() {
         bail!(
-            "secrets/keys.enc is missing\n  hint: re-run `hh pack --with-secrets` to regenerate the encrypted file"
+            "secrets/keys.enc is missing\n  hint: re-run `pn pack --with-secrets` to regenerate the encrypted file"
         );
     }
 

@@ -9,7 +9,8 @@ use crate::security::crypto;
 use crate::security::signing;
 use crate::utils::ignore::IgnorePatterns;
 
-/// Execute `hh pack`.
+/// Execute `pn pack`.
+#[allow(clippy::too_many_arguments)]
 pub fn execute(
     bundle_path: Option<String>,
     pi_path: Option<String>,
@@ -47,18 +48,17 @@ pub fn execute(
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "not a valid hitchhike bundle: no manifest.yaml in {}\n  hint: run `hh init` first",
+            "not a valid agentpacknest bundle: no manifest.yaml in {}\n  hint: run `pn init` first",
             bundle_dir.display()
         );
     }
 
     // ── 2. Load and validate manifest ──────────────────────────────
-    let mut m = manifest::load(&manifest_path)
-        .context("failed to load manifest")?;
+    let mut m = manifest::load(&manifest_path).context("failed to load manifest")?;
 
     if m.harness.name != "pi" {
         bail!(
-            "unsupported harness in manifest: `{}`\n  only 'pi' is supported in hh v0.1\n  hint: this bundle was created for a different harness",
+            "unsupported harness in manifest: `{}`\n  only 'pi' is supported in pn v0.1\n  hint: this bundle was created for a different harness",
             m.harness.name
         );
     }
@@ -68,8 +68,7 @@ pub fn execute(
 
     // ── 3. Detect Pi installation ──────────────────────────────────
     let pi_detect_path = pi_path.as_ref().map(PathBuf::from);
-    let pi = PiInstallation::detect(pi_detect_path)
-        .context("failed to detect Pi installation")?;
+    let pi = PiInstallation::detect(pi_detect_path).context("failed to detect Pi installation")?;
 
     println!("Pi source:  {}", pi.root().display());
     println!();
@@ -77,7 +76,10 @@ pub fn execute(
     // ── 4. Load ignore patterns ────────────────────────────────────
     let ignore = IgnorePatterns::load(pi.root());
     if !ignore.is_empty() {
-        println!("Ignore:     {} pattern(s) from .hitchhikeignore", ignore.len());
+        println!(
+            "Ignore:     {} pattern(s) from .agentpacknestignore",
+            ignore.len()
+        );
         println!();
     }
 
@@ -129,8 +131,7 @@ pub fn execute(
     let checksum = compute_bundle_checksum(&bundle_dir)?;
     m.integrity.checksum = Some(checksum.clone());
 
-    manifest::save(&manifest_path, &m)
-        .context("failed to save updated manifest")?;
+    manifest::save(&manifest_path, &m).context("failed to save updated manifest")?;
 
     println!();
     println!("  ✓ manifest.yaml updated (checksum: {})", &checksum[..16]);
@@ -149,8 +150,13 @@ pub fn execute(
     // ── Summary ────────────────────────────────────────────────────
     println!();
     println!("Pack complete!");
-    println!("  Contents:  config={}  memory={}  skills={}  secrets={}",
-        flag(do_config), flag(do_memory), flag(do_skills), flag(do_secrets));
+    println!(
+        "  Contents:  config={}  memory={}  skills={}  secrets={}",
+        flag(do_config),
+        flag(do_memory),
+        flag(do_skills),
+        flag(do_secrets)
+    );
     println!("  Bundle:    {}/", bundle_dir.display());
     println!();
 
@@ -163,7 +169,13 @@ pub fn execute(
 
 /// Copy a directory tree recursively. Skips if source doesn't exist.
 /// Files matching ignore patterns are skipped.
-fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str, ignore: &IgnorePatterns) -> Result<()> {
+fn copy_dir_recursive(
+    src: &Path,
+    dst: &Path,
+    force: bool,
+    label: &str,
+    ignore: &IgnorePatterns,
+) -> Result<()> {
     if !src.is_dir() {
         println!("  ⚠ {} not found in Pi installation, skipping", label);
         return Ok(());
@@ -214,7 +226,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str, ignore: 
     }
 
     if skipped > 0 {
-        println!("  ✓ {} copied ({} files, {} ignored)", label, count, skipped);
+        println!(
+            "  ✓ {} copied ({} files, {} ignored)",
+            label, count, skipped
+        );
     } else {
         println!("  ✓ {} copied ({} files)", label, count);
     }
@@ -223,7 +238,12 @@ fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str, ignore: 
 
 /// Copy packages (extensions, skills, themes) from Pi into bundle.
 /// Files matching ignore patterns are skipped.
-fn copy_packages(pi: &PiInstallation, bundle_dir: &Path, force: bool, ignore: &IgnorePatterns) -> Result<()> {
+fn copy_packages(
+    pi: &PiInstallation,
+    bundle_dir: &Path,
+    force: bool,
+    ignore: &IgnorePatterns,
+) -> Result<()> {
     let src = pi.packages_path();
     if !src.is_dir() {
         println!("  ⚠ packages/ not found in Pi installation, skipping");
@@ -252,10 +272,7 @@ fn copy_packages(pi: &PiInstallation, bundle_dir: &Path, force: bool, ignore: &I
             for entry in walker {
                 // Reject symlinks
                 if entry.file_type().is_symlink() {
-                    bail!(
-                        "symlink not allowed in bundle: {}",
-                        entry.path().display()
-                    );
+                    bail!("symlink not allowed in bundle: {}", entry.path().display());
                 }
 
                 let rel = entry.path().strip_prefix(&sub_src).unwrap();
@@ -334,9 +351,7 @@ fn copy_secrets_encrypted(pi: &PiInstallation, bundle_dir: &Path, force: bool) -
     let secrets_dst = bundle_dir.join("secrets/keys.enc");
 
     if secrets_dst.exists() && !force {
-        bail!(
-            "secrets/keys.enc already exists\n  use --force to overwrite"
-        );
+        bail!("secrets/keys.enc already exists\n  use --force to overwrite");
     }
 
     // ── Collect secrets ────────────────────────────────────────────
@@ -354,7 +369,11 @@ fn copy_secrets_encrypted(pi: &PiInstallation, bundle_dir: &Path, force: bool) -
         return Ok(());
     }
 
-    println!("  Found {} secret(s): {}", bundle.len(), bundle.keys().join(", "));
+    println!(
+        "  Found {} secret(s): {}",
+        bundle.len(),
+        bundle.keys().join(", ")
+    );
 
     // ── Prompt for passphrase ──────────────────────────────────────
     let passphrase = crypto::prompt_passphrase_confirm()?;
@@ -364,14 +383,16 @@ fn copy_secrets_encrypted(pi: &PiInstallation, bundle_dir: &Path, force: bool) -
         fs::create_dir_all(parent)?;
     }
 
-    bundle.save_encrypted(&secrets_dst, &passphrase)
+    bundle
+        .save_encrypted(&secrets_dst, &passphrase)
         .context("failed to encrypt and save secrets")?;
 
-    let file_size = fs::metadata(&secrets_dst)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let file_size = fs::metadata(&secrets_dst).map(|m| m.len()).unwrap_or(0);
 
-    println!("  ✓ secrets encrypted → secrets/keys.enc ({} bytes)", file_size);
+    println!(
+        "  ✓ secrets encrypted → secrets/keys.enc ({} bytes)",
+        file_size
+    );
     Ok(())
 }
 
@@ -411,10 +432,13 @@ fn create_archive(bundle_dir: &Path, encrypt: bool) -> Result<()> {
     use tar::Builder;
 
     let ext = if encrypt { ".tar.gz.enc" } else { ".tar.gz" };
-    let archive_name = format!("{}{}", bundle_dir.file_name()
-        .unwrap_or_default()
-        .to_string_lossy(), ext);
-    let archive_path = bundle_dir.parent()
+    let archive_name = format!(
+        "{}{}",
+        bundle_dir.file_name().unwrap_or_default().to_string_lossy(),
+        ext
+    );
+    let archive_path = bundle_dir
+        .parent()
         .unwrap_or(Path::new("."))
         .join(&archive_name);
 
@@ -426,11 +450,8 @@ fn create_archive(bundle_dir: &Path, encrypt: bool) -> Result<()> {
     {
         let enc = GzEncoder::new(&mut tar_gz_buf, Compression::default());
         let mut tar = Builder::new(enc);
-        tar.append_dir_all(
-            bundle_dir.file_name().unwrap_or_default(),
-            bundle_dir,
-        )
-        .context("failed to add files to archive")?;
+        tar.append_dir_all(bundle_dir.file_name().unwrap_or_default(), bundle_dir)
+            .context("failed to add files to archive")?;
         tar.finish().context("failed to finalize archive")?;
     }
 
@@ -439,8 +460,12 @@ fn create_archive(bundle_dir: &Path, encrypt: bool) -> Result<()> {
         let passphrase = crypto::prompt_passphrase_confirm()?;
         let mut encrypted = crypto::encrypt_secrets(&passphrase, &tar_gz_buf)
             .context("failed to encrypt archive")?;
-        fs::write(&archive_path, &encrypted)
-            .with_context(|| format!("failed to write encrypted archive: {}", archive_path.display()))?;
+        fs::write(&archive_path, &encrypted).with_context(|| {
+            format!(
+                "failed to write encrypted archive: {}",
+                archive_path.display()
+            )
+        })?;
         zeroize_buffer(&mut tar_gz_buf);
         zeroize_buffer(&mut encrypted);
     } else {
@@ -451,7 +476,11 @@ fn create_archive(bundle_dir: &Path, encrypt: bool) -> Result<()> {
     let size = fs::metadata(&archive_path)
         .map(|m| m.len() as f64 / 1024.0)
         .unwrap_or(0.0);
-    println!("  ✓ archive created ({:.1} KB){}", size, if encrypt { " (encrypted)" } else { "" });
+    println!(
+        "  ✓ archive created ({:.1} KB){}",
+        size,
+        if encrypt { " (encrypted)" } else { "" }
+    );
 
     Ok(())
 }
@@ -465,8 +494,8 @@ fn zeroize_buffer(buf: &mut Vec<u8>) {
 
 /// Sign the manifest and save signature to bundle.
 fn sign_manifest(m: &manifest::Manifest, bundle_dir: &Path) -> Result<()> {
-    let manifest_yaml = serde_yaml::to_string(m)
-        .context("failed to serialize manifest for signing")?;
+    let manifest_yaml =
+        serde_yaml::to_string(m).context("failed to serialize manifest for signing")?;
 
     let signature = signing::sign(manifest_yaml.as_bytes())
         .context("failed to sign manifest — is your keypair set up?")?;
@@ -474,12 +503,15 @@ fn sign_manifest(m: &manifest::Manifest, bundle_dir: &Path) -> Result<()> {
     // Save signature next to manifest in the bundle root
     // (not a secret — it's a tamper-evident seal)
     let sig_path = bundle_dir.join("manifest.sig");
-    signing::save_signature(&sig_path, &signature)
-        .context("failed to save signature")?;
+    signing::save_signature(&sig_path, &signature).context("failed to save signature")?;
 
     Ok(())
 }
 
 fn flag(v: bool) -> &'static str {
-    if v { "yes" } else { "no" }
+    if v {
+        "yes"
+    } else {
+        "no"
+    }
 }

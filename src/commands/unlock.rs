@@ -6,12 +6,8 @@ use crate::core::manifest;
 use crate::security::crypto;
 use crate::security::secrets::SecretsBundle;
 
-/// Execute `hh unlock`.
-pub fn execute(
-    bundle_path: Option<String>,
-    show: bool,
-    env_mode: bool,
-) -> Result<()> {
+/// Execute `pn unlock`.
+pub fn execute(bundle_path: Option<String>, show: bool, env_mode: bool) -> Result<()> {
     // ── 1. Resolve bundle directory ────────────────────────────────
     let bundle_dir = match bundle_path {
         Some(p) => PathBuf::from(p),
@@ -28,14 +24,13 @@ pub fn execute(
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "no manifest.yaml found in {}\n  hint: this doesn't look like an hitchhike bundle",
+            "no manifest.yaml found in {}\n  hint: this doesn't look like an agentpacknest bundle",
             bundle_dir.display()
         );
     }
 
     // ── 2. Load manifest ───────────────────────────────────────────
-    let m = manifest::load(&manifest_path)
-        .context("failed to load manifest")?;
+    let m = manifest::load(&manifest_path).context("failed to load manifest")?;
 
     println!("Bundle:   {}", m.bundle.name);
     println!("Harness:  {} v{}", m.harness.name, m.harness.version);
@@ -44,14 +39,14 @@ pub fn execute(
     if !m.security.secrets_encrypted {
         println!();
         println!("No encrypted secrets in this bundle.");
-        println!("hint: use `hh pack --with-secrets` to add encrypted secrets.");
+        println!("hint: use `pn pack --with-secrets` to add encrypted secrets.");
         return Ok(());
     }
 
     let enc_path = bundle_dir.join("secrets/keys.enc");
     if !enc_path.is_file() {
         bail!(
-            "manifest says secrets are encrypted but secrets/keys.enc is missing\n  hint: re-run `hh pack --with-secrets` to regenerate"
+            "manifest says secrets are encrypted but secrets/keys.enc is missing\n  hint: re-run `pn pack --with-secrets` to regenerate"
         );
     }
 

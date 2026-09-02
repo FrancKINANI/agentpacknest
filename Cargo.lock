@@ -44,6 +44,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentpacknest"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "argon2",
+ "clap",
+ "dirs",
+ "ed25519-dalek",
+ "flate2",
+ "hex",
+ "rand",
+ "rpassword",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "walkdir",
+ "zeroize",
+]
+
+[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -449,31 +474,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hitchhike"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "argon2",
- "clap",
- "dirs",
- "ed25519-dalek",
- "flate2",
- "hex",
- "rand",
- "rpassword",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tar",
- "tempfile",
- "thiserror",
- "walkdir",
- "zeroize",
-]
 
 [[package]]
 name = "indexmap"

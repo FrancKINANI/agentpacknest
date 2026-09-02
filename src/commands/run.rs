@@ -10,7 +10,7 @@ use crate::security::crypto;
 use crate::security::secrets::SecretsBundle;
 use crate::security::signing;
 
-/// Execute `hh run`.
+/// Execute `pn run`.
 pub fn execute(
     bundle_path: Option<String>,
     passphrase: Option<String>,
@@ -34,14 +34,13 @@ pub fn execute(
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "no manifest.yaml found in {}\n  hint: this doesn't look like an hitchhike bundle — run `hh init` to create one",
+            "no manifest.yaml found in {}\n  hint: this doesn't look like an agentpacknest bundle — run `pn init` to create one",
             bundle_dir.display()
         );
     }
 
     // ── 2. Load and validate manifest ──────────────────────────────
-    let m = manifest::load(&manifest_path)
-        .context("failed to load manifest")?;
+    let m = manifest::load(&manifest_path).context("failed to load manifest")?;
 
     println!("Bundle:   {}", m.bundle.name);
     println!("Harness:  {} v{}", m.harness.name, m.harness.version);
@@ -90,7 +89,7 @@ pub fn execute(
         let enc_path = bundle_dir.join("secrets/keys.enc");
         if !enc_path.is_file() {
             bail!(
-                "manifest says secrets are encrypted but secrets/keys.enc is missing\n  hint: re-run `hh pack --with-secrets` to regenerate the encrypted file"
+                "manifest says secrets are encrypted but secrets/keys.enc is missing\n  hint: re-run `pn pack --with-secrets` to regenerate the encrypted file"
             );
         }
 
@@ -112,8 +111,7 @@ pub fn execute(
     // ── 6. Prepare working directory ───────────────────────────────
     let run_workdir = match workdir {
         Some(w) => PathBuf::from(w),
-        None => bundle_dir
-            .join(m.launch.working_directory.as_deref().unwrap_or(".")),
+        None => bundle_dir.join(m.launch.working_directory.as_deref().unwrap_or(".")),
     };
 
     if !run_workdir.is_dir() {
@@ -133,7 +131,7 @@ pub fn execute(
     }
 
     let cmd_name = command_parts[0];
-    let mut cmd_args: Vec<&str> = command_parts[1..].iter().copied().collect();
+    let mut cmd_args: Vec<&str> = command_parts[1..].to_vec();
     cmd_args.extend(args.iter().map(|s| s.as_str()));
 
     // ── 9. Dry run or execute ──────────────────────────────────────
@@ -201,7 +199,7 @@ fn check_stale_bundle(m: &manifest::Manifest) -> Result<()> {
                     age_days, origin.origin_machine
                 );
                 println!("  hint: the local harness may have changed since then.");
-                println!("  run `hh diff` to compare, or `hh pack` to refresh.");
+                println!("  run `pn diff` to compare, or `pn pack` to refresh.");
                 println!();
             }
         }
@@ -242,7 +240,7 @@ fn parse_iso8601_secs(ts: &str) -> Result<u64> {
 }
 
 fn is_leap_year(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
 }
 
 // ---------------------------------------------------------------------------
@@ -250,16 +248,11 @@ fn is_leap_year(year: u64) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Verify the manifest signature.
-fn verify_manifest_signature(
-    manifest_path: &Path,
-    sig_path: &Path,
-) -> Result<bool> {
-    let manifest_bytes = fs::read(manifest_path)
-        .context("failed to read manifest for verification")?;
-    let sig_bytes = signing::load_signature(sig_path)
-        .context("failed to load signature")?;
-    let vk = signing::load_verifying_key()
-        .context("failed to load verifying key")?;
+fn verify_manifest_signature(manifest_path: &Path, sig_path: &Path) -> Result<bool> {
+    let manifest_bytes =
+        fs::read(manifest_path).context("failed to read manifest for verification")?;
+    let sig_bytes = signing::load_signature(sig_path).context("failed to load signature")?;
+    let vk = signing::load_verifying_key().context("failed to load verifying key")?;
 
     signing::verify(&manifest_bytes, &sig_bytes, &vk.to_bytes())
         .context("signature verification failed")
@@ -325,15 +318,15 @@ fn check_node_version(min_major: u32) -> Result<()> {
     let version_str = stdout.trim().trim_start_matches('v');
 
     let parts: Vec<&str> = version_str.split('.').collect();
-    let major: u32 = parts.first()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    let major: u32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
 
     if major < min_major {
         bail!(
             "Node.js v{} detected, but Pi requires >= v{}.0\n  \
              upgrade: https://nodejs.org/ or `nvm install {}`",
-            version_str, min_major, min_major
+            version_str,
+            min_major,
+            min_major
         );
     }
 
@@ -347,8 +340,8 @@ fn check_node_version(min_major: u32) -> Result<()> {
 
 /// Build environment variables for the agent process.
 ///
-/// - Sets `HITCHHIKE_BUNDLE` to the bundle path
-/// - Sets `HITCHHIKE_HARNESS` to the harness name
+/// - Sets `AGENTPACKNEST_BUNDLE` to the bundle path
+/// - Sets `AGENTPACKNEST_HARNESS` to the harness name
 /// - Injects decrypted secrets as individual env vars
 fn build_env(
     bundle_dir: &Path,
@@ -357,28 +350,25 @@ fn build_env(
 ) -> HashMap<String, String> {
     let mut env = HashMap::new();
 
-    // Core hitchhike vars
+    // Core agentpacknest vars
     env.insert(
-        "HITCHHIKE_BUNDLE".to_string(),
+        "AGENTPACKNEST_BUNDLE".to_string(),
         bundle_dir.to_string_lossy().into_owned(),
     );
-    env.insert(
-        "HITCHHIKE_HARNESS".to_string(),
-        m.harness.name.clone(),
-    );
+    env.insert("AGENTPACKNEST_HARNESS".to_string(), m.harness.name.clone());
 
     // Agent-specific dirs
     let agent_dir = bundle_dir.join("agent");
     env.insert(
-        "HITCHHIKE_CONFIG".to_string(),
+        "AGENTPACKNEST_CONFIG".to_string(),
         agent_dir.join("config").to_string_lossy().into_owned(),
     );
     env.insert(
-        "HITCHHIKE_MEMORY".to_string(),
+        "AGENTPACKNEST_MEMORY".to_string(),
         agent_dir.join("memory").to_string_lossy().into_owned(),
     );
     env.insert(
-        "HITCHHIKE_PACKAGES".to_string(),
+        "AGENTPACKNEST_PACKAGES".to_string(),
         agent_dir.join("packages").to_string_lossy().into_owned(),
     );
 
@@ -416,7 +406,16 @@ fn run_command(
     // Unix: PATH, HOME, USER, SHELL, LANG, etc.
     // Windows: SystemRoot, COMSPEC, PATHEXT, TEMP, etc.
     let inherit_keys = if cfg!(target_os = "windows") {
-        &["PATH", "HOME", "USER", "SystemRoot", "COMSPEC", "PATHEXT", "TEMP", "TMP"] as &[&str]
+        &[
+            "PATH",
+            "HOME",
+            "USER",
+            "SystemRoot",
+            "COMSPEC",
+            "PATHEXT",
+            "TEMP",
+            "TMP",
+        ] as &[&str]
     } else {
         &["PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TMPDIR"] as &[&str]
     };
