@@ -186,6 +186,17 @@ pub enum Commands {
         #[arg(long)]
         env: bool,
     },
+
+    /// Change the passphrase for encrypted secrets without re-packing
+    #[command(after_help = "EXAMPLES:\n\
+        \n  Rotate passphrase for current bundle:\n    \
+            hh rekey .\n\
+        \n  Rotate passphrase for a specific bundle:\n    \
+            hh rekey ./bundles/my-agent")]
+    Rekey {
+        /// Path to the bundle directory (default: current dir)
+        bundle: Option<String>,
+    },
 }
 
 pub fn parse() -> Cli {

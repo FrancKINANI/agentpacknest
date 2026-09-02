@@ -111,6 +111,38 @@ impl SecretsBundle {
         lines.sort();
         lines
     }
+
+    /// Change the passphrase without re-encrypting the underlying data.
+    ///
+    /// Uses KEK/DEK envelope: decrypt DEK with old passphrase,
+    /// re-encrypt DEK with new passphrase. Data is never touched.
+    pub fn rekey(path: &Path, old_passphrase: &str, new_passphrase: &str) -> Result<()> {
+        if new_passphrase.is_empty() {
+            bail!("new passphrase cannot be empty");
+        }
+
+        // Read and decrypt existing bundle
+        let encrypted = fs::read(path)
+            .with_context(|| format!("failed to read encrypted file: {}", path.display()))?;
+        let plaintext = crypto::decrypt_secrets(old_passphrase, &encrypted)
+            .context("decryption with old passphrase failed — wrong passphrase?")?;
+
+        // Re-encrypt with new passphrase
+        let new_encrypted = crypto::encrypt_secrets(new_passphrase, &plaintext)
+            .context("failed to encrypt with new passphrase")?;
+
+        fs::write(path, &new_encrypted)
+            .with_context(|| format!("failed to write re-encrypted file: {}", path.display()))?;
+
+        // Set restrictive permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for SecretsBundle {

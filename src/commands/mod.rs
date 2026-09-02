@@ -4,6 +4,7 @@ pub mod run;
 pub mod diff;
 pub mod info;
 pub mod unlock;
+pub mod rekey;
 
 use crate::cli::{Cli, Commands};
 use anyhow::Result;
@@ -33,6 +34,9 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Commands::Info { bundle } => info::execute(bundle),
         Commands::Unlock { bundle, show, env } => {
             unlock::execute(bundle, show, env)
+        }
+        Commands::Rekey { bundle } => {
+            rekey::execute(bundle)
         }
     }
 }
