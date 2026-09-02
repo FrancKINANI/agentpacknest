@@ -21,6 +21,9 @@ pub struct Manifest {
     pub launch: Launch,
     pub security: Security,
     pub integrity: Integrity,
+    /// Snapshot provenance — populated by `hh pack`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<OriginMeta>,
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +142,24 @@ pub struct Integrity {
 }
 
 // ---------------------------------------------------------------------------
+// Origin / snapshot metadata
+// ---------------------------------------------------------------------------
+
+/// Provenance metadata — records where and when a bundle was packed,
+/// plus a hash of the source harness state at pack time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OriginMeta {
+    /// Hostname of the machine where `hh pack` was run.
+    pub origin_machine: String,
+    /// ISO 8601 timestamp of when `hh pack` was run.
+    pub packed_at: String,
+    /// SHA-256 hash of the harness source state at pack time.
+    /// Used by `hh diff` to detect drift.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_state_hash: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Validation error type
 // ---------------------------------------------------------------------------
 
@@ -230,6 +251,7 @@ pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
             algorithm: "sha256".to_string(),
             checksum: None,
         },
+        origin: None,
     }
 }
 
@@ -375,6 +397,21 @@ fn whoami() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
+fn hostname() -> String {
+    #[cfg(unix)]
+    {
+        if let Ok(name) = std::process::Command::new("hostname")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        {
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    whoami()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -433,6 +470,7 @@ mod tests {
                 algorithm: "sha256".to_string(),
                 checksum: None,
             },
+            origin: None,
         }
     }
 

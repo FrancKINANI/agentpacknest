@@ -44,7 +44,10 @@ pub fn execute(
     println!("Bundle:   {}", m.bundle.name);
     println!("Harness:  {} v{}", m.harness.name, m.harness.version);
 
-    // ── 3. Check integrity ─────────────────────────────────────────
+    // ── 3. Check bundle freshness ──────────────────────────────────
+    check_stale_bundle(&m)?;
+
+    // ── 4. Check integrity ─────────────────────────────────────────
     if let Some(ref expected) = m.integrity.checksum {
         match verify_checksum(&bundle_dir, expected) {
             Ok(true) => println!("Checksum: ✓ verified"),
@@ -154,6 +157,74 @@ pub fn execute(
     }
 
     process::exit(exit_code);
+}
+
+// ---------------------------------------------------------------------------
+// Stale bundle detection
+// ---------------------------------------------------------------------------
+
+/// Check if the bundle is stale compared to current time.
+/// Warns (does not block) if packed_at is older than 7 days.
+fn check_stale_bundle(m: &manifest::Manifest) -> Result<()> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    if let Some(ref origin) = m.origin {
+        if let Ok(pack_secs) = parse_iso8601_secs(&origin.packed_at) {
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            let age_days = now_secs.saturating_sub(pack_secs) / 86400;
+
+            if age_days > 7 {
+                println!(
+                    "⚠ WARNING: this bundle was packed {} days ago on '{}'",
+                    age_days, origin.origin_machine
+                );
+                println!("  hint: the local harness may have changed since then.");
+                println!("  run `hh diff` to compare, or `hh pack` to refresh.");
+                println!();
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Parse ISO 8601 timestamp to seconds since epoch.
+fn parse_iso8601_secs(ts: &str) -> Result<u64> {
+    // Simple parser for "2025-01-15T12:34:56Z" format
+    let parts: Vec<&str> = ts.trim_end_matches('Z').split(['T', '-', ':']).collect();
+    if parts.len() != 6 {
+        bail!("invalid timestamp format: {}", ts);
+    }
+    let year: u64 = parts[0].parse().context("bad year")?;
+    let month: u64 = parts[1].parse().context("bad month")?;
+    let day: u64 = parts[2].parse().context("bad day")?;
+    let hour: u64 = parts[3].parse().context("bad hour")?;
+    let minute: u64 = parts[4].parse().context("bad minute")?;
+    let second: u64 = parts[5].parse().context("bad second")?;
+
+    // Days since epoch (simplified — ignores leap seconds)
+    let mut total_days = 0u64;
+    for y in 1970..year {
+        total_days += if is_leap_year(y) { 366 } else { 365 };
+    }
+    let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    for m in 1..month {
+        total_days += month_days[m as usize];
+        if m == 2 && is_leap_year(year) {
+            total_days += 1;
+        }
+    }
+    total_days += day - 1;
+
+    let secs = total_days * 86400 + hour * 3600 + minute * 60 + second;
+    Ok(secs)
+}
+
+fn is_leap_year(year: u64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
 // ---------------------------------------------------------------------------

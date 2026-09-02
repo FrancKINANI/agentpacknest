@@ -1,6 +1,7 @@
 pub mod init;
 pub mod pack;
 pub mod run;
+pub mod diff;
 pub mod info;
 pub mod unlock;
 
@@ -25,6 +26,9 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         }
         Commands::Run { bundle, passphrase, workdir, dry_run, args } => {
             run::execute(bundle, passphrase, workdir, dry_run, args)
+        }
+        Commands::Diff { bundle, path } => {
+            diff::execute(bundle, path)
         }
         Commands::Info { bundle } => info::execute(bundle),
         Commands::Unlock { bundle, show, env } => {

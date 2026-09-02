@@ -135,6 +135,21 @@ pub enum Commands {
         args: Vec<String>,
     },
 
+    /// Compare a bundle with the local harness state
+    #[command(after_help = "EXAMPLES:\n\
+        \n  Compare current bundle with local Pi:\n    \
+            hh diff .\n\
+        \n  Compare with a specific harness path:\n    \
+            hh diff . --path ~/.pi/agent")]
+    Diff {
+        /// Path to the bundle directory (default: current dir)
+        bundle: Option<String>,
+
+        /// Path to the local harness installation
+        #[arg(short = 'p', long)]
+        path: Option<String>,
+    },
+
     /// Display bundle metadata and contents
     #[command(after_help = "EXAMPLES:\n\
         \n  Show info for current directory:\n    \

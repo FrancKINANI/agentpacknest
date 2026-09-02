@@ -37,6 +37,7 @@ hh run .
 | `hh init` | Create a new bundle from a harness installation |
 | `hh pack` | Copy config, skills, memory, and secrets into the bundle |
 | `hh run` | Launch the agent defined in the bundle |
+| `hh diff` | Compare a bundle with the local harness state |
 | `hh info` | Display bundle metadata and contents |
 | `hh unlock` | Decrypt and inspect secrets (never written to disk) |
 
@@ -95,6 +96,18 @@ hh run . --workdir /tmp/agent-workspace
 
 **Security:** Secrets are never written to disk. The environment is cleared before execution — only essential system vars (`PATH`, `HOME`, etc.) and agent-specific vars are injected.
 
+### `hh diff`
+
+Compares the bundle's contents with the current state of the local harness. Shows files that are modified, added, or removed since the bundle was packed.
+
+```bash
+# Compare with auto-detected Pi installation
+hh diff .
+
+# Compare with specific path
+hh diff . --path ~/.pi/agent
+```
+
 ### `hh info`
 
 Displays bundle metadata in a readable format.
@@ -142,6 +155,9 @@ my-agent/
 - **No plaintext on disk** — secrets exist only in memory during `run` and `unlock`
 - **Environment isolation** — `hh run` clears the inherited environment and injects only what's needed
 - **Integrity verification** — SHA-256 checksum of the bundle is stored in the manifest
+- **Snapshot provenance** — each pack records `origin_machine`, `packed_at`, and `source_state_hash` in the manifest
+- **Stale bundle warning** — `hh run` warns if the bundle was packed more than 7 days ago
+- **File permissions** — `keys.enc` is created with `0600` (owner-only) on Unix
 
 ## Example flow
 
@@ -180,11 +196,12 @@ hh run coding-agent/
 
 ## Limitations
 
-- **Only the `pi` harness is supported** in v0.1. Other harnesses (Aider, etc.) will be added later.
+- **Only the `pi` harness is supported** in v0.1. Aider support is scaffolded but not yet functional.
 - **No Windows Pi detection yet** — `~/.pi` is a Unix convention.
 - **Archive is uncompressed tar.gz** — no encryption of the archive itself.
 - **Secrets passphrase cannot be changed** after packing (re-pack with new passphrase).
 - **No bundle signing** — integrity is checksum-based, not cryptographic signatures.
+- **Snapshots, not sync** — hitchhike creates explicit point-in-time snapshots. It does not automatically synchronize between machines. Use `hh diff` before re-packing to avoid overwriting newer state.
 
 ## License
 
