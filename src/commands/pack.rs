@@ -6,6 +6,7 @@ use crate::core::manifest;
 use crate::harness::pi::detect::PiInstallation;
 use crate::harness::types::HarnessAdapter;
 use crate::security::crypto;
+use crate::security::signing;
 
 /// Execute `hh pack`.
 pub fn execute(
@@ -119,7 +120,13 @@ pub fn execute(
     println!();
     println!("  ✓ manifest.yaml updated (checksum: {})", &checksum[..16]);
 
-    // ── 6. Archive ─────────────────────────────────────────────────
+    // ── 6. Sign the manifest ───────────────────────────────────────
+    match sign_manifest(&m, &bundle_dir) {
+        Ok(()) => println!("  ✓ manifest signed"),
+        Err(e) => println!("  ⚠ signing skipped: {}", e),
+    }
+
+    // ── 7. Archive ─────────────────────────────────────────────────
     if archive {
         create_archive(&bundle_dir)?;
     }
@@ -392,6 +399,23 @@ fn create_archive(bundle_dir: &Path) -> Result<()> {
         .map(|m| m.len() as f64 / 1024.0)
         .unwrap_or(0.0);
     println!("  ✓ archive created ({:.1} KB)", size);
+
+    Ok(())
+}
+
+/// Sign the manifest and save signature to bundle.
+fn sign_manifest(m: &manifest::Manifest, bundle_dir: &Path) -> Result<()> {
+    let manifest_yaml = serde_yaml::to_string(m)
+        .context("failed to serialize manifest for signing")?;
+
+    let signature = signing::sign(manifest_yaml.as_bytes())
+        .context("failed to sign manifest — is your keypair set up?")?;
+
+    // Save signature next to manifest in the bundle root
+    // (not a secret — it's a tamper-evident seal)
+    let sig_path = bundle_dir.join("manifest.sig");
+    signing::save_signature(&sig_path, &signature)
+        .context("failed to save signature")?;
 
     Ok(())
 }

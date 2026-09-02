@@ -1,12 +1,14 @@
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
 use crate::core::manifest;
 use crate::security::crypto;
 use crate::security::secrets::SecretsBundle;
+use crate::security::signing;
 
 /// Execute `hh run`.
 pub fn execute(
@@ -62,7 +64,23 @@ pub fn execute(
         println!("Checksum: (not set)");
     }
 
-    // ── 4. Check runtime requirements ──────────────────────────────
+    // ── 5. Check signature ─────────────────────────────────────────
+    let sig_path = bundle_dir.join("manifest.sig");
+    if sig_path.is_file() {
+        match verify_manifest_signature(&manifest_path, &sig_path) {
+            Ok(true) => println!("Signature: ✓ verified"),
+            Ok(false) => {
+                println!("⚠ WARNING: invalid manifest signature!");
+                println!("  the bundle may have been tampered with");
+                println!("  (continuing anyway — this is a warning, not a blocker)");
+            }
+            Err(e) => println!("⚠ WARNING: signature check failed: {}", e),
+        }
+    } else {
+        println!("Signature: (unsigned)");
+    }
+
+    // ── 6. Check runtime requirements ──────────────────────────────
     if m.harness.name == "pi" {
         check_node_version(20)?;
     }
@@ -225,6 +243,26 @@ fn parse_iso8601_secs(ts: &str) -> Result<u64> {
 
 fn is_leap_year(year: u64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+// ---------------------------------------------------------------------------
+// Signature verification
+// ---------------------------------------------------------------------------
+
+/// Verify the manifest signature.
+fn verify_manifest_signature(
+    manifest_path: &Path,
+    sig_path: &Path,
+) -> Result<bool> {
+    let manifest_bytes = fs::read(manifest_path)
+        .context("failed to read manifest for verification")?;
+    let sig_bytes = signing::load_signature(sig_path)
+        .context("failed to load signature")?;
+    let vk = signing::load_verifying_key()
+        .context("failed to load verifying key")?;
+
+    signing::verify(&manifest_bytes, &sig_bytes, &vk.to_bytes())
+        .context("signature verification failed")
 }
 
 // ---------------------------------------------------------------------------
