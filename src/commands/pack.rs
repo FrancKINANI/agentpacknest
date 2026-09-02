@@ -7,6 +7,7 @@ use crate::harness::pi::detect::PiInstallation;
 use crate::harness::types::HarnessAdapter;
 use crate::security::crypto;
 use crate::security::signing;
+use crate::utils::ignore::IgnorePatterns;
 
 /// Execute `hh pack`.
 pub fn execute(
@@ -73,13 +74,21 @@ pub fn execute(
     println!("Pi source:  {}", pi.root().display());
     println!();
 
-    // ── 4. Copy files ──────────────────────────────────────────────
+    // ── 4. Load ignore patterns ────────────────────────────────────
+    let ignore = IgnorePatterns::load(pi.root());
+    if !ignore.is_empty() {
+        println!("Ignore:     {} pattern(s) from .hitchhikeignore", ignore.len());
+        println!();
+    }
+
+    // ── 5. Copy files ──────────────────────────────────────────────
     if do_config {
         copy_dir_recursive(
             &pi.config_path(),
             &bundle_dir.join("agent/config"),
             force,
             "config",
+            &ignore,
         )?;
     }
 
@@ -89,11 +98,12 @@ pub fn execute(
             &bundle_dir.join("agent/memory"),
             force,
             "memory",
+            &ignore,
         )?;
     }
 
     if do_skills {
-        copy_packages(&pi, &bundle_dir, force)?;
+        copy_packages(&pi, &bundle_dir, force, &ignore)?;
     }
 
     if do_secrets {
@@ -152,7 +162,8 @@ pub fn execute(
 // ---------------------------------------------------------------------------
 
 /// Copy a directory tree recursively. Skips if source doesn't exist.
-fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str) -> Result<()> {
+/// Files matching ignore patterns are skipped.
+fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str, ignore: &IgnorePatterns) -> Result<()> {
     if !src.is_dir() {
         println!("  ⚠ {} not found in Pi installation, skipping", label);
         return Ok(());
@@ -166,6 +177,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str) -> Resul
     }
 
     let mut count = 0u64;
+    let mut skipped = 0u64;
     let walker = walkdir::WalkDir::new(src)
         .follow_links(false)
         .into_iter()
@@ -180,6 +192,14 @@ fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str) -> Resul
         }
 
         let rel = entry.path().strip_prefix(src).unwrap();
+        let rel_str = rel.to_string_lossy();
+
+        // Check ignore patterns
+        if !ignore.is_empty() && ignore.is_ignored(&rel_str) {
+            skipped += 1;
+            continue;
+        }
+
         let target = dst.join(rel);
 
         if entry.file_type().is_dir() {
@@ -193,12 +213,17 @@ fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, label: &str) -> Resul
         }
     }
 
-    println!("  ✓ {} copied ({} files)", label, count);
+    if skipped > 0 {
+        println!("  ✓ {} copied ({} files, {} ignored)", label, count, skipped);
+    } else {
+        println!("  ✓ {} copied ({} files)", label, count);
+    }
     Ok(())
 }
 
 /// Copy packages (extensions, skills, themes) from Pi into bundle.
-fn copy_packages(pi: &PiInstallation, bundle_dir: &Path, force: bool) -> Result<()> {
+/// Files matching ignore patterns are skipped.
+fn copy_packages(pi: &PiInstallation, bundle_dir: &Path, force: bool, ignore: &IgnorePatterns) -> Result<()> {
     let src = pi.packages_path();
     if !src.is_dir() {
         println!("  ⚠ packages/ not found in Pi installation, skipping");
@@ -234,6 +259,13 @@ fn copy_packages(pi: &PiInstallation, bundle_dir: &Path, force: bool) -> Result<
                 }
 
                 let rel = entry.path().strip_prefix(&sub_src).unwrap();
+                let rel_str = rel.to_string_lossy();
+
+                // Check ignore patterns
+                if !ignore.is_empty() && ignore.is_ignored(&rel_str) {
+                    continue;
+                }
+
                 let target = sub_dst.join(rel);
                 if entry.file_type().is_dir() {
                     fs::create_dir_all(&target)?;
