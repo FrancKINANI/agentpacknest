@@ -99,6 +99,10 @@ pub enum Commands {
         #[arg(long)]
         archive: bool,
 
+        /// Encrypt the archive with AES-256-GCM (requires --archive)
+        #[arg(long)]
+        encrypt_archive: bool,
+
         /// Overwrite existing files in the bundle
         #[arg(long)]
         force: bool,

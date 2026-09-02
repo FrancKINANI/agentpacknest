@@ -18,6 +18,7 @@ pub fn execute(
     with_secrets: bool,
     all: bool,
     archive: bool,
+    encrypt_archive: bool,
     force: bool,
 ) -> Result<()> {
     // ── Resolve flags (--all expands) ──────────────────────────────
@@ -30,6 +31,10 @@ pub fn execute(
         bail!(
             "nothing to pack — no content flags specified\n  hint: use --all to include everything, or pick one or more of:\n    --with-config   configuration files\n    --with-memory   session history\n    --with-skills   extensions, skills, themes\n    --with-secrets  encrypted secrets"
         );
+    }
+
+    if encrypt_archive && !archive {
+        bail!("--encrypt-archive requires --archive");
     }
 
     // ── 1. Resolve bundle directory ────────────────────────────────
@@ -128,7 +133,7 @@ pub fn execute(
 
     // ── 7. Archive ─────────────────────────────────────────────────
     if archive {
-        create_archive(&bundle_dir)?;
+        create_archive(&bundle_dir, encrypt_archive)?;
     }
 
     // ── Summary ────────────────────────────────────────────────────
@@ -367,14 +372,16 @@ fn compute_bundle_checksum(bundle_dir: &Path) -> Result<String> {
 }
 
 /// Create a .tar.gz archive of the bundle directory.
-fn create_archive(bundle_dir: &Path) -> Result<()> {
+/// If `encrypt` is true, the archive is encrypted with AES-256-GCM.
+fn create_archive(bundle_dir: &Path, encrypt: bool) -> Result<()> {
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use tar::Builder;
 
-    let archive_name = format!("{}.tar.gz", bundle_dir.file_name()
+    let ext = if encrypt { ".tar.gz.enc" } else { ".tar.gz" };
+    let archive_name = format!("{}{}", bundle_dir.file_name()
         .unwrap_or_default()
-        .to_string_lossy());
+        .to_string_lossy(), ext);
     let archive_path = bundle_dir.parent()
         .unwrap_or(Path::new("."))
         .join(&archive_name);
@@ -382,25 +389,46 @@ fn create_archive(bundle_dir: &Path) -> Result<()> {
     println!();
     println!("Creating archive: {}", archive_path.display());
 
-    let file = fs::File::create(&archive_path)
-        .with_context(|| format!("failed to create archive: {}", archive_path.display()))?;
-    let enc = GzEncoder::new(file, Compression::default());
-    let mut tar = Builder::new(enc);
+    // Build the .tar.gz in memory first
+    let mut tar_gz_buf = Vec::new();
+    {
+        let enc = GzEncoder::new(&mut tar_gz_buf, Compression::default());
+        let mut tar = Builder::new(enc);
+        tar.append_dir_all(
+            bundle_dir.file_name().unwrap_or_default(),
+            bundle_dir,
+        )
+        .context("failed to add files to archive")?;
+        tar.finish().context("failed to finalize archive")?;
+    }
 
-    tar.append_dir_all(
-        bundle_dir.file_name().unwrap_or_default(),
-        bundle_dir,
-    )
-    .context("failed to add files to archive")?;
-
-    tar.finish().context("failed to finalize archive")?;
+    if encrypt {
+        // Prompt for passphrase and encrypt the entire archive
+        let passphrase = crypto::prompt_passphrase_confirm()?;
+        let mut encrypted = crypto::encrypt_secrets(&passphrase, &tar_gz_buf)
+            .context("failed to encrypt archive")?;
+        fs::write(&archive_path, &encrypted)
+            .with_context(|| format!("failed to write encrypted archive: {}", archive_path.display()))?;
+        zeroize_buffer(&mut tar_gz_buf);
+        zeroize_buffer(&mut encrypted);
+    } else {
+        fs::write(&archive_path, &tar_gz_buf)
+            .with_context(|| format!("failed to write archive: {}", archive_path.display()))?;
+    }
 
     let size = fs::metadata(&archive_path)
         .map(|m| m.len() as f64 / 1024.0)
         .unwrap_or(0.0);
-    println!("  ✓ archive created ({:.1} KB)", size);
+    println!("  ✓ archive created ({:.1} KB){}", size, if encrypt { " (encrypted)" } else { "" });
 
     Ok(())
+}
+
+/// Zeroize a buffer to prevent secrets from lingering in memory.
+fn zeroize_buffer(buf: &mut Vec<u8>) {
+    use zeroize::Zeroize;
+    buf.zeroize();
+    buf.clear();
 }
 
 /// Sign the manifest and save signature to bundle.

@@ -16,12 +16,12 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Commands::Pack {
             bundle, path,
             with_config, with_memory, with_skills, with_secrets,
-            all, archive, force,
+            all, archive, encrypt_archive, force,
         } => {
             pack::execute(
                 bundle, path,
                 with_config, with_memory, with_skills, with_secrets,
-                all, archive, force,
+                all, archive, encrypt_archive, force,
             )
         }
         Commands::Run { bundle, passphrase, workdir, dry_run, args } => {
