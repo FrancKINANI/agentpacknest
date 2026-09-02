@@ -8,7 +8,7 @@ use crate::core::manifest;
 use crate::security::crypto;
 use crate::security::secrets::SecretsBundle;
 
-/// Execute `agp run`.
+/// Execute `hh run`.
 pub fn execute(
     bundle_path: Option<String>,
     passphrase: Option<String>,
@@ -32,7 +32,7 @@ pub fn execute(
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "no manifest.yaml found in {}\n  hint: this doesn't look like an agentpack bundle — run `agp init` to create one",
+            "no manifest.yaml found in {}\n  hint: this doesn't look like an hitchhike bundle — run `hh init` to create one",
             bundle_dir.display()
         );
     }
@@ -69,7 +69,7 @@ pub fn execute(
         let enc_path = bundle_dir.join("secrets/keys.enc");
         if !enc_path.is_file() {
             bail!(
-                "manifest says secrets are encrypted but secrets/keys.enc is missing\n  hint: re-run `agp pack --with-secrets` to regenerate the encrypted file"
+                "manifest says secrets are encrypted but secrets/keys.enc is missing\n  hint: re-run `hh pack --with-secrets` to regenerate the encrypted file"
             );
         }
 
@@ -238,8 +238,8 @@ fn check_node_version(min_major: u32) -> Result<()> {
 
 /// Build environment variables for the agent process.
 ///
-/// - Sets `AGENTPACK_BUNDLE` to the bundle path
-/// - Sets `AGENTPACK_HARNESS` to the harness name
+/// - Sets `HITCHHIKE_BUNDLE` to the bundle path
+/// - Sets `HITCHHIKE_HARNESS` to the harness name
 /// - Injects decrypted secrets as individual env vars
 fn build_env(
     bundle_dir: &Path,
@@ -248,28 +248,28 @@ fn build_env(
 ) -> HashMap<String, String> {
     let mut env = HashMap::new();
 
-    // Core agentpack vars
+    // Core hitchhike vars
     env.insert(
-        "AGENTPACK_BUNDLE".to_string(),
+        "HITCHHIKE_BUNDLE".to_string(),
         bundle_dir.to_string_lossy().into_owned(),
     );
     env.insert(
-        "AGENTPACK_HARNESS".to_string(),
+        "HITCHHIKE_HARNESS".to_string(),
         m.harness.name.clone(),
     );
 
     // Agent-specific dirs
     let agent_dir = bundle_dir.join("agent");
     env.insert(
-        "AGENTPACK_CONFIG".to_string(),
+        "HITCHHIKE_CONFIG".to_string(),
         agent_dir.join("config").to_string_lossy().into_owned(),
     );
     env.insert(
-        "AGENTPACK_MEMORY".to_string(),
+        "HITCHHIKE_MEMORY".to_string(),
         agent_dir.join("memory").to_string_lossy().into_owned(),
     );
     env.insert(
-        "AGENTPACK_PACKAGES".to_string(),
+        "HITCHHIKE_PACKAGES".to_string(),
         agent_dir.join("packages").to_string_lossy().into_owned(),
     );
 

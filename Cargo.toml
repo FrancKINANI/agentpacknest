@@ -1,12 +1,12 @@
 [package]
-name = "agentpack"
+name = "hitchhike"
 version = "0.1.0"
 edition = "2021"
-description = "A CLI tool to initialize, pack, run, and manage agent bundles"
+description = "Package coding agents into portable, reproducible bundles"
 license = "MIT"
 
 [[bin]]
-name = "agp"
+name = "hh"
 path = "src/main.rs"
 
 [dependencies]

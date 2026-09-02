@@ -219,7 +219,7 @@ pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
             }],
         },
         launch: Launch {
-            command: "agp run .".to_string(),
+            command: "hh run .".to_string(),
             working_directory: Some(".".to_string()),
         },
         security: Security {
@@ -243,7 +243,7 @@ impl Manifest {
         // Schema version check
         if self.schema_version != SCHEMA_VERSION {
             bail!(
-                "unsupported schema_version: expected '{}', got '{}'\n  hint: this bundle was created with a different version of agp",
+                "unsupported schema_version: expected '{}', got '{}'\n  hint: this bundle was created with a different version of hh",
                 SCHEMA_VERSION, self.schema_version
             );
         }
@@ -272,7 +272,7 @@ impl Manifest {
         let known_harnesses = ["pi"];
         if !known_harnesses.contains(&self.harness.name.as_str()) {
             bail!(
-                "unknown harness '{}'\n  supported harnesses: {}\n  hint: only 'pi' is supported in agp v0.1",
+                "unknown harness '{}'\n  supported harnesses: {}\n  hint: only 'pi' is supported in hh v0.1",
                 self.harness.name,
                 known_harnesses.join(", ")
             );
@@ -422,7 +422,7 @@ mod tests {
                 }],
             },
             launch: Launch {
-                command: "agp run .".to_string(),
+                command: "hh run .".to_string(),
                 working_directory: Some(".".to_string()),
             },
             security: Security {

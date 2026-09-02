@@ -25,7 +25,7 @@
 //! - Pi: config is `settings.json` (JSON) in a central agent dir
 //! - Aider: config is `.aider.conf.yml` (YAML) per project
 //!
-//! - Pi: secrets in `auth.json` (JSON, encrypted by agentpack)
+//! - Pi: secrets in `auth.json` (JSON, encrypted by hitchhike)
 //! - Aider: secrets in `.env` (plaintext) or env vars
 //!
 //! - Pi: history in `sessions/` dir (structured .jsonl)

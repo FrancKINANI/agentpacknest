@@ -7,7 +7,7 @@ use crate::harness::pi::detect::PiInstallation;
 use crate::harness::types::HarnessAdapter;
 use crate::security::crypto;
 
-/// Execute `agp pack`.
+/// Execute `hh pack`.
 pub fn execute(
     bundle_path: Option<String>,
     pi_path: Option<String>,
@@ -40,7 +40,7 @@ pub fn execute(
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "not a valid agentpack bundle: no manifest.yaml in {}\n  hint: run `agp init` first",
+            "not a valid hitchhike bundle: no manifest.yaml in {}\n  hint: run `hh init` first",
             bundle_dir.display()
         );
     }
@@ -51,7 +51,7 @@ pub fn execute(
 
     if m.harness.name != "pi" {
         bail!(
-            "unsupported harness in manifest: `{}`\n  only 'pi' is supported in agp v0.1\n  hint: this bundle was created for a different harness",
+            "unsupported harness in manifest: `{}`\n  only 'pi' is supported in hh v0.1\n  hint: this bundle was created for a different harness",
             m.harness.name
         );
     }

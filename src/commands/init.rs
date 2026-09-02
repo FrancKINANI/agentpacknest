@@ -15,7 +15,7 @@ pub fn execute(
     // ── 1. Validate harness ────────────────────────────────────────
     if harness != "pi" {
         bail!(
-            "unsupported harness: `{}`\n  supported harnesses: pi\n  hint: only 'pi' is available in agp v0.1",
+            "unsupported harness: `{}`\n  supported harnesses: pi\n  hint: only 'pi' is available in hh v0.1",
             harness
         );
     }
@@ -90,7 +90,7 @@ pub fn execute(
     println!();
     println!("Next steps:");
     println!("  cd {}", out_dir.display());
-    println!("  agp info .");
+    println!("  hh info .");
     println!();
 
     Ok(())

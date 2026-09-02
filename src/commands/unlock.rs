@@ -6,7 +6,7 @@ use crate::core::manifest;
 use crate::security::crypto;
 use crate::security::secrets::SecretsBundle;
 
-/// Execute `agp unlock`.
+/// Execute `hh unlock`.
 pub fn execute(
     bundle_path: Option<String>,
     show: bool,
@@ -28,7 +28,7 @@ pub fn execute(
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "no manifest.yaml found in {}\n  hint: this doesn't look like an agentpack bundle",
+            "no manifest.yaml found in {}\n  hint: this doesn't look like an hitchhike bundle",
             bundle_dir.display()
         );
     }
@@ -44,14 +44,14 @@ pub fn execute(
     if !m.security.secrets_encrypted {
         println!();
         println!("No encrypted secrets in this bundle.");
-        println!("hint: use `agp pack --with-secrets` to add encrypted secrets.");
+        println!("hint: use `hh pack --with-secrets` to add encrypted secrets.");
         return Ok(());
     }
 
     let enc_path = bundle_dir.join("secrets/keys.enc");
     if !enc_path.is_file() {
         bail!(
-            "manifest says secrets are encrypted but secrets/keys.enc is missing\n  hint: re-run `agp pack --with-secrets` to regenerate"
+            "manifest says secrets are encrypted but secrets/keys.enc is missing\n  hint: re-run `hh pack --with-secrets` to regenerate"
         );
     }
 

@@ -16,7 +16,7 @@ pub fn execute(bundle: String) -> Result<()> {
     let manifest_path = bundle_dir.join("manifest.yaml");
     if !manifest_path.is_file() {
         bail!(
-            "no manifest.yaml found in {}\n  hint: this doesn't look like an agentpack bundle",
+            "no manifest.yaml found in {}\n  hint: this doesn't look like an hitchhike bundle",
             bundle
         );
     }
