@@ -4,7 +4,10 @@ use std::fs;
 use std::path::Path;
 
 /// Current schema version supported by this implementation.
-const SCHEMA_VERSION: &str = "0.1";
+const SCHEMA_VERSION: &str = "0.2";
+
+/// The version of agentpacknest that created this manifest.
+const AGENTPACKNEST_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ---------------------------------------------------------------------------
 // Root manifest
@@ -13,8 +16,17 @@ const SCHEMA_VERSION: &str = "0.1";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Manifest {
     pub schema_version: String,
+    /// Version of agentpacknest that created this bundle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agentpacknest_version: Option<String>,
+    /// Monotonically increasing bundle format version.
+    #[serde(default = "default_bundle_version")]
+    pub bundle_version: u32,
     pub bundle: BundleMeta,
     pub harness: HarnessMeta,
+    /// Platform where this bundle was created.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<PlatformMeta>,
     pub contents: Contents,
     pub packages: Packages,
     pub runtime: Runtime,
@@ -24,6 +36,10 @@ pub struct Manifest {
     /// Snapshot provenance — populated by `pn pack`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<OriginMeta>,
+}
+
+fn default_bundle_version() -> u32 {
+    1
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +158,24 @@ pub struct Integrity {
 }
 
 // ---------------------------------------------------------------------------
+// Platform metadata
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlatformMeta {
+    pub os: String,
+    pub arch: String,
+}
+
+impl PlatformMeta {
+    pub fn detect() -> Self {
+        let os = std::env::consts::OS.to_string();
+        let arch = std::env::consts::ARCH.to_string();
+        Self { os, arch }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Origin / snapshot metadata
 // ---------------------------------------------------------------------------
 
@@ -210,6 +244,8 @@ pub fn save(path: &Path, manifest: &Manifest) -> Result<()> {
 pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
     Manifest {
         schema_version: SCHEMA_VERSION.to_string(),
+        agentpacknest_version: Some(AGENTPACKNEST_VERSION.to_string()),
+        bundle_version: 1,
         bundle: BundleMeta {
             name: name.to_string(),
             id: uuid_v4(),
@@ -222,6 +258,7 @@ pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
             version: harness_version.to_string(),
             source: None,
         },
+        platform: Some(PlatformMeta::detect()),
         contents: Contents {
             config: false,
             memory: false,
@@ -262,10 +299,10 @@ pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
 impl Manifest {
     /// Validate the manifest for structural correctness.
     pub fn validate(&self) -> Result<()> {
-        // Schema version check
-        if self.schema_version != SCHEMA_VERSION {
+        // Schema version check — accept 0.1 (legacy) and 0.2 (current)
+        if self.schema_version != "0.1" && self.schema_version != SCHEMA_VERSION {
             bail!(
-                "unsupported schema_version: expected '{}', got '{}'\n  hint: this bundle was created with a different version of pn",
+                "unsupported schema_version: expected '0.1' or '{}', got '{}'\n  hint: this bundle was created with a different version of pn",
                 SCHEMA_VERSION, self.schema_version
             );
         }
@@ -423,6 +460,8 @@ mod tests {
     fn sample_manifest() -> Manifest {
         Manifest {
             schema_version: SCHEMA_VERSION.to_string(),
+            agentpacknest_version: Some("0.1.0".to_string()),
+            bundle_version: 1,
             bundle: BundleMeta {
                 name: "test-agent".to_string(),
                 id: "f47ac10b-58cc-4372-a567-0e02b2c3d479".to_string(),
@@ -435,6 +474,10 @@ mod tests {
                 version: "0.1.0".to_string(),
                 source: Some("https://example.com".to_string()),
             },
+            platform: Some(PlatformMeta {
+                os: "linux".to_string(),
+                arch: "x86_64".to_string(),
+            }),
             contents: Contents {
                 config: true,
                 memory: true,

@@ -48,6 +48,19 @@ pub fn execute(bundle: String) -> Result<()> {
     if let Some(ref desc) = m.bundle.description {
         println!("  Description  {}", desc);
     }
+    if let Some(ref ver) = m.agentpacknest_version {
+        println!("  Packed by    agentpacknest v{}", ver);
+    }
+    println!("  Bundle fmt   v{}", m.bundle_version);
+
+    // ── Platform ────────────────────────────────────────────────────
+    if let Some(ref plat) = m.platform {
+        println!();
+        println!("  Platform");
+        println!("  {}", "─".repeat(44));
+        println!("  OS           {}", plat.os);
+        println!("  Arch         {}", plat.arch);
+    }
 
     // ── Harness ─────────────────────────────────────────────────────
     println!();
@@ -60,7 +73,7 @@ pub fn execute(bundle: String) -> Result<()> {
 
     // ── Contents ────────────────────────────────────────────────────
     println!();
-    println!("  Contents");
+    println!("  Components");
     println!("  {}", "─".repeat(44));
     println!(
         "  config={}  memory={}  skills={}  secrets={}",
@@ -111,15 +124,6 @@ pub fn execute(bundle: String) -> Result<()> {
         None => println!("  Checksum     (not computed)"),
     }
 
-    // ── Launch ──────────────────────────────────────────────────────
-    println!();
-    println!("  Launch");
-    println!("  {}", "─".repeat(44));
-    println!("  Command      {}", m.launch.command);
-    if let Some(ref wd) = m.launch.working_directory {
-        println!("  Work dir     {}", wd);
-    }
-
     // ── Signature ───────────────────────────────────────────────────
     println!();
     println!("  Signature");
@@ -135,8 +139,120 @@ pub fn execute(bundle: String) -> Result<()> {
         println!("  Status       (unsigned — no manifest.sig found)");
     }
 
+    // ── Launch ──────────────────────────────────────────────────────
+    println!();
+    println!("  Launch");
+    println!("  {}", "─".repeat(44));
+    println!("  Command      {}", m.launch.command);
+    if let Some(ref wd) = m.launch.working_directory {
+        println!("  Work dir     {}", wd);
+    }
+
+    // ── Reproducibility Report ──────────────────────────────────────
+    println!();
+    println!("  Reproducibility");
+    println!("  {}", "─".repeat(44));
+    let (score, warnings) = compute_reproducibility(&m, bundle_dir);
+    println!("  Score        {}%", score);
+    if warnings.is_empty() {
+        println!("  Warnings     (none)");
+    } else {
+        for w in &warnings {
+            println!("  ⚠ {}", w);
+        }
+    }
+
     println!();
     Ok(())
+}
+
+/// Compute a reproducibility score (0-100) and list warnings.
+///
+/// Factors:
+/// - Has config: +15
+/// - Has skills: +15
+/// - Has memory: +10
+/// - Has secrets encrypted: +15
+/// - Has integrity checksum: +10
+/// - Has signature: +10
+/// - Has platform info: +5
+/// - Has origin/provenance: +5
+/// - Has runtime requirements: +5
+/// - Has packages: +5
+/// - No warnings penalty: up to +5
+fn compute_reproducibility(m: &manifest::Manifest, bundle_dir: &Path) -> (u32, Vec<String>) {
+    let mut score = 0u32;
+    let mut warnings = Vec::new();
+
+    // Components
+    if m.contents.config {
+        score += 15;
+    } else {
+        warnings.push("no config packed — bundle may not be self-contained".to_string());
+    }
+    if m.contents.skills {
+        score += 15;
+    } else {
+        warnings.push("no skills packed — agent capabilities may differ".to_string());
+    }
+    if m.contents.memory {
+        score += 10;
+    } else {
+        warnings.push("no memory packed — session history lost".to_string());
+    }
+    if m.contents.secrets && m.security.secrets_encrypted {
+        score += 15;
+    } else if m.contents.secrets {
+        score += 5;
+        warnings.push("secrets present but not encrypted".to_string());
+    } else {
+        warnings.push("no secrets packed — API keys may be missing".to_string());
+    }
+
+    // Integrity
+    if m.integrity.checksum.is_some() {
+        score += 10;
+    } else {
+        warnings.push("no checksum — bundle integrity unverified".to_string());
+    }
+
+    // Signature
+    let sig_path = bundle_dir.join("manifest.sig");
+    if sig_path.is_file() {
+        score += 10;
+    } else {
+        warnings.push("unsigned bundle — authenticity unverified".to_string());
+    }
+
+    // Platform
+    if m.platform.is_some() {
+        score += 5;
+    } else {
+        warnings.push("no platform info — cross-platform compatibility unknown".to_string());
+    }
+
+    // Origin
+    if m.origin.is_some() {
+        score += 5;
+    }
+
+    // Runtime
+    if !m.runtime.required.is_empty() {
+        score += 5;
+    } else {
+        warnings.push("no runtime requirements specified".to_string());
+    }
+
+    // Packages
+    let pkg_count = m.packages.extensions.len() + m.packages.skills.len() + m.packages.themes.len();
+    if pkg_count > 0 {
+        score += 5;
+    }
+
+    // Cap at 100
+    score = score.min(100);
+
+    (score, warnings)
 }
 
 fn flag(v: bool) -> &'static str {

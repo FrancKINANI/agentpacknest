@@ -29,11 +29,11 @@ impl IgnorePatterns {
     /// Parse patterns from a specific file path.
     pub fn from_file(path: &Path) -> Self {
         let content = fs::read_to_string(path).unwrap_or_default();
-        Self::from_str(&content)
+        Self::parse(&content)
     }
 
     /// Parse patterns from a string.
-    pub fn from_str(content: &str) -> Self {
+    pub fn parse(content: &str) -> Self {
         let patterns = content
             .lines()
             .map(|l| l.trim())
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn exact_filename_match() {
-        let p = IgnorePatterns::from_str("secrets.env\n");
+        let p = IgnorePatterns::parse("secrets.env\n");
         assert!(p.is_ignored("secrets.env"));
         assert!(p.is_ignored("dir/secrets.env"));
         assert!(!p.is_ignored("secrets.env.bak"));
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn glob_match() {
-        let p = IgnorePatterns::from_str("*.log\n*.tmp\n");
+        let p = IgnorePatterns::parse("*.log\n*.tmp\n");
         assert!(p.is_ignored("debug.log"));
         assert!(p.is_ignored("logs/debug.log"));
         assert!(p.is_ignored("file.tmp"));
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn directory_pattern() {
-        let p = IgnorePatterns::from_str("cache\n");
+        let p = IgnorePatterns::parse("cache\n");
         assert!(p.is_ignored("cache/some-file"));
         assert!(p.is_ignored("my/cache/dir/file"));
         assert!(!p.is_ignored("cache_file"));
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn prefix_match() {
-        let p = IgnorePatterns::from_str("/tmp\n");
+        let p = IgnorePatterns::parse("/tmp\n");
         assert!(p.is_ignored("tmp/file"));
         assert!(p.is_ignored("tmp/deep/file"));
         assert!(!p.is_ignored("not-tmp/file"));
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn comments_and_blank_lines() {
-        let p = IgnorePatterns::from_str("# comment\n\n*.log\n  \n# another\n");
+        let p = IgnorePatterns::parse("# comment\n\n*.log\n  \n# another\n");
         assert_eq!(p.len(), 1);
         assert!(p.is_ignored("test.log"));
     }

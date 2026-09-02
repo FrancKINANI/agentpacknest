@@ -1,10 +1,25 @@
 # agentpacknest
 
-**Package coding agents into portable, reproducible bundles.**
+**Portable, reproducible environments for AI coding agents.**
 
-`agentpacknest` (`pn`) is a CLI tool that takes an existing coding agent (currently [Pi](https://pi.dev)), packs its configuration, skills, memory, and encrypted secrets into a self-contained bundle, then lets you run or transfer that bundle to another machine with minimal friction.
+`agentpacknest` (`pn`) captures an existing coding agent's configuration, skills, memory, and encrypted secrets into a self-contained bundle — then reproduces that environment on another machine with minimal friction.
 
-> **This is NOT a new coding agent.** It's a packaging and runtime layer that sits on top of existing harnesses.
+> **This is NOT a new coding agent.** It's a packaging and runtime layer that sits on top of existing harnesses (Pi, Aider, and more to come).
+
+## Why?
+
+Every developer using AI coding agents accumulates a unique environment:
+
+- Agent runtime (Pi, Aider, Claude Code, Codex…)
+- Configuration and settings
+- Skills, extensions, and themes
+- Session memory and history
+- API keys and secrets
+- MCP server configs
+
+Moving this environment to another machine — or sharing it with a teammate — is currently a manual, error-prone process.
+
+**agentpacknest solves this** by treating the entire agent environment as a portable, versioned, signed bundle.
 
 ## Install
 
@@ -17,191 +32,118 @@ Requires Rust ≥ 1.75. Manage with [mise](https://mise.jdx.dev) or [rustup](htt
 ## Quick start
 
 ```bash
-# 1. Initialize a bundle from your local Pi installation
-pn init --path ~/.pi --name my-agent
+# 1. Capture your Pi environment
+pn init --harness pi --path ~/.pi --name my-agent
 
-# 2. Pack everything into the bundle
+# 2. Pack config, skills, and secrets
 pn pack --all --path ~/.pi
 
-# 3. Inspect what was packed
+# 3. Inspect the bundle
 pn info .
 
-# 4. Run the agent
+# 4. Run on another machine
 pn run .
 ```
 
 ## Commands
 
-| Command | Purpose |
-|---------|---------|
+| Command | What it does |
+|---|---|
 | `pn init` | Create a new bundle from a harness installation |
-| `pn pack` | Copy config, skills, memory, and secrets into the bundle |
+| `pn pack` | Copy config, memory, skills, secrets into the bundle |
 | `pn run` | Launch the agent defined in the bundle |
-| `pn diff` | Compare a bundle with the local harness state |
-| `pn info` | Display bundle metadata and contents |
-| `pn unlock` | Decrypt and inspect secrets (never written to disk) |
+| `pn info` | Display bundle metadata and reproducibility score |
+| `pn diff` | Compare bundle with local harness state |
+| `pn unlock` | Decrypt and inspect secrets (masked by default) |
+| `pn rekey` | Rotate passphrase without re-packing |
 
-### `pn init`
-
-Creates the bundle skeleton — directory structure + `manifest.yaml`.
-
-```bash
-pn init --harness pi --path ~/.pi --name my-agent --output ./bundles/my-agent
-```
-
-**Flags:**
-- `--harness <name>` — Harness to use (default: `pi`, only option for now)
-- `-p, --path <path>` — Path to the harness installation
-- `-n, --name <name>` — Bundle name
-- `-o, --output <dir>` — Output directory
-
-### `pn pack`
-
-Copies files from the harness installation into the bundle and updates the manifest.
+### Examples
 
 ```bash
-# Pack everything
-pn pack --all --path ~/.pi
+# Init with Aider harness
+pn init --harness aider --name research-agent
 
-# Pack specific components
-pn pack --with-config --with-skills --path ~/.pi
+# Pack everything and create encrypted archive
+pn pack --all --archive --encrypt-archive --path ~/.pi
 
-# Pack and create an archive
-pn pack --all --archive --path ~/.pi
-```
-
-**Flags:**
-- `--with-config` — Include configuration files
-- `--with-memory` — Include session history
-- `--with-skills` — Include extensions, skills, and themes
-- `--with-secrets` — Encrypt and include secrets (prompts for passphrase)
-- `--all` — Include everything above
-- `--archive` — Create a `.tar.gz` alongside the bundle
-- `--force` — Overwrite existing files
-
-### `pn run`
-
-Launches the agent. Decrypts secrets in memory only, sets up environment variables, and executes the command from `manifest.yaml`.
-
-```bash
-# Run normally
-pn run .
-
-# Preview without executing
-pn run . --dry-run
-
-# Custom working directory
-pn run . --workdir /tmp/agent-workspace
-```
-
-**Security:** Secrets are never written to disk. The environment is cleared before execution — only essential system vars (`PATH`, `HOME`, etc.) and agent-specific vars are injected.
-
-### `pn diff`
-
-Compares the bundle's contents with the current state of the local harness. Shows files that are modified, added, or removed since the bundle was packed.
-
-```bash
-# Compare with auto-detected Pi installation
-pn diff .
-
-# Compare with specific path
+# Check bundle freshness
 pn diff . --path ~/.pi/agent
-```
 
-### `pn info`
-
-Displays bundle metadata in a readable format.
-
-```bash
-pn info .
-```
-
-### `pn unlock`
-
-Decrypts secrets and displays them. Values are masked by default.
-
-```bash
-# Masked (default)
-pn unlock .
-
-# Full values
-pn unlock . --show
-
-# KEY=value format (for sourcing)
-pn unlock . --env
+# Rotate passphrase
+pn rekey .
 ```
 
 ## Bundle structure
 
 ```
 my-agent/
-├── manifest.yaml          # Bundle metadata, checksums, config
-├── launch                 # Entry point script
+├── manifest.yaml          # Metadata, integrity, platform info
+├── manifest.sig           # Ed25519 signature (tamper-evident)
 ├── agent/
-│   ├── config/            # Harness configuration
-│   ├── memory/            # Session history (optional)
-│   ├── packages/
-│   │   ├── extensions/    # Installed extensions
-│   │   ├── skills/        # Agent skills
-│   │   └── themes/        # UI themes
-│   └── workspace/         # Agent workspace
-└── secrets/
-    └── keys.enc           # AES-256-GCM encrypted secrets
+│   ├── config/            # Agent configuration files
+│   ├── memory/            # Session history and state
+│   └── packages/
+│       ├── extensions/    # Installed extensions
+│       ├── skills/        # Agent skills
+│       └── themes/        # UI themes
+├── secrets/
+│   └── keys.enc           # Encrypted secrets (AES-256-GCM)
+└── launch                 # Launch script (placeholder)
 ```
 
-## Security model
+## Security
 
-- **Secrets are always encrypted** at rest with AES-256-GCM (Argon2 key derivation)
-- **No plaintext on disk** — secrets exist only in memory during `run` and `unlock`
-- **Environment isolation** — `pn run` clears the inherited environment and injects only what's needed
-- **Integrity verification** — SHA-256 checksum of the bundle is stored in the manifest
-- **Snapshot provenance** — each pack records `origin_machine`, `packed_at`, and `source_state_hash` in the manifest
-- **Stale bundle warning** — `pn run` warns if the bundle was packed more than 7 days ago
-- **File permissions** — `keys.enc` is created with `0600` (owner-only) on Unix
+agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the full threat model.
 
-## Example flow
+**Highlights:**
+- Secrets encrypted with AES-256-GCM + Argon2 key derivation
+- Ed25519 bundle signing (tamper-evident)
+- KEK/DEK envelope for passphrase rotation without re-packing
+- `env_clear()` prevents leaking host environment to agents
+- Zeroization of sensitive buffers after use
+- Restrictive file permissions (0600) on secrets
 
-```bash
-# Create a bundle from a Pi installation
-pn init --path ~/.pi --name coding-agent
+## Reproducibility
 
-# Pack configuration and skills
-pn pack --with-config --with-skills --path ~/.pi
+`pn info` includes a **reproducibility score** (0-100%) based on:
 
-# Pack secrets (interactive passphrase prompt)
-pn pack --with-secrets --path ~/.pi
+- Components packed (config, skills, memory, secrets)
+- Integrity verification (checksum, signature)
+- Platform metadata
+- Runtime requirements
+- Provenance tracking
 
-# Verify the bundle
-pn info .
-
-# Preview execution
-pn run . --dry-run
-
-# Run it
-pn run .
-
-# Transfer to another machine
-tar czf coding-agent.tar.gz coding-agent/
-scp coding-agent.tar.gz remote:~/
-
-# On the remote machine
-tar xzf coding-agent.tar.gz
-pn run coding-agent/
+```
+  Reproducibility
+  ────────────────────────────────────────────
+  Score        85%
+  ⚠ no memory packed — session history lost
+  ⚠ unsigned bundle — authenticity unverified
 ```
 
-## Requirements
+## Supported harnesses
 
-- **Node.js ≥ 20** (required by Pi harness — checked automatically at `pn run`)
-- A Pi installation (detected from `~/.pi` or `PI_HOME` env var)
+| Harness | Status | Notes |
+|---|---|---|
+| [Pi](https://pi.dev) | ✅ Full support | Detection, config, skills, memory, secrets |
+| [Aider](https://aider.chat) | 🔨 Skeleton | Detection planned, pack not yet implemented |
+| Claude Code | 📋 Planned | — |
+| Codex | 📋 Planned | — |
 
-## Limitations
+## Roadmap
 
-- **Only the `pi` harness is supported** in v0.1. Aider support is scaffolded but not yet functional.
-- **No Windows Pi detection yet** — `~/.pi` is a Unix convention.
-- **Archive is uncompressed tar.gz** — no encryption of the archive itself.
-- **Secrets passphrase cannot be changed** after packing (re-pack with new passphrase).
-- **No bundle signing** — integrity is checksum-based, not cryptographic signatures.
-- **Snapshots, not sync** — agentpacknest creates explicit point-in-time snapshots. It does not automatically synchronize between machines. Use `pn diff` before re-packing to avoid overwriting newer state.
+- **v0.1** — Pi harness rock-solid (current)
+- **v0.2** — Harness trait abstraction
+- **v0.3** — Second harness (Aider or Claude Code)
+- **v0.4** — MCP config + dependency management
+- **v0.5** — Trust chain + publish/pull
+
+## Contributing
+
+1. Fork the repo
+2. Create a feature branch from `main`
+3. Work on `staging`, merge to `main` after CI passes
+4. All changes must pass: `cargo clippy -D warnings`, `cargo fmt --check`, `cargo test`
 
 ## License
 
