@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use crate::core::manifest;
+use crate::domain::manifest;
 use crate::security::crypto;
 use crate::security::secrets::SecretsBundle;
 use crate::security::signing;

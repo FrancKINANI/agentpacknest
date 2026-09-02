@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::core::manifest;
+use crate::domain::manifest;
 
 /// Execute `pn diff`.
 pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> {

@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::env;
 use std::path::PathBuf;
 
-use crate::core::manifest;
+use crate::domain::manifest;
 use crate::security::crypto;
 use crate::security::secrets::SecretsBundle;
 

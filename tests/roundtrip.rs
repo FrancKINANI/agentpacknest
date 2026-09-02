@@ -22,7 +22,7 @@ fn temp_bundle() -> tempfile::TempDir {
 
 #[test]
 fn manifest_roundtrip() {
-    let manifest = agentpacknest::core::manifest::default_pi("test-agent", "0.84.4");
+    let manifest = agentpacknest::domain::manifest::default_pi("test-agent", "0.84.4");
 
     // Validate
     manifest.validate().expect("manifest should be valid");
@@ -37,7 +37,7 @@ fn manifest_roundtrip() {
     assert!(yaml.contains("arch:"));
 
     // Deserialize back
-    let loaded: agentpacknest::core::manifest::Manifest =
+    let loaded: agentpacknest::domain::manifest::Manifest =
         serde_yaml::from_str(&yaml).expect("should deserialize");
     loaded.validate().expect("loaded manifest should be valid");
 
@@ -56,7 +56,7 @@ fn manifest_roundtrip() {
 
 #[test]
 fn default_pi_manifest_is_valid() {
-    let m = agentpacknest::core::manifest::default_pi("my-agent", "0.84.4");
+    let m = agentpacknest::domain::manifest::default_pi("my-agent", "0.84.4");
     assert!(m.validate().is_ok());
     assert_eq!(m.schema_version, "0.2");
     assert!(!m.bundle.id.is_empty());
@@ -71,14 +71,14 @@ fn default_pi_manifest_is_valid() {
 
 #[test]
 fn schema_v01_is_accepted() {
-    let mut m = agentpacknest::core::manifest::default_pi("test", "0.1.0");
+    let mut m = agentpacknest::domain::manifest::default_pi("test", "0.1.0");
     m.schema_version = "0.1".to_string();
     assert!(m.validate().is_ok(), "schema 0.1 should be accepted");
 }
 
 #[test]
 fn schema_v99_is_rejected() {
-    let mut m = agentpacknest::core::manifest::default_pi("test", "0.1.0");
+    let mut m = agentpacknest::domain::manifest::default_pi("test", "0.1.0");
     m.schema_version = "9.9".to_string();
     assert!(m.validate().is_err(), "schema 9.9 should be rejected");
 }
@@ -158,7 +158,7 @@ fn secrets_bundle_save_load_roundtrip() {
 
 #[test]
 fn ignore_patterns_filter_files() {
-    use agentpacknest::utils::ignore::IgnorePatterns;
+    use agentpacknest::infrastructure::ignore::IgnorePatterns;
 
     let patterns = IgnorePatterns::parse("*.log\nsecrets.env\ncache\n");
     assert!(!patterns.is_empty());
@@ -178,7 +178,7 @@ fn ignore_patterns_filter_files() {
 
 #[test]
 fn platform_detection() {
-    let plat = agentpacknest::core::manifest::PlatformMeta::detect();
+    let plat = agentpacknest::domain::manifest::PlatformMeta::detect();
     assert!(!plat.os.is_empty());
     assert!(!plat.arch.is_empty());
 

@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::core::manifest;
+use crate::domain::manifest;
 use crate::harness::pi::detect::PiInstallation;
 use crate::harness::types::HarnessAdapter;
 

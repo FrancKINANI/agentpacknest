@@ -5,10 +5,14 @@
 
 pub mod bundle;
 pub mod component;
+pub mod environment;
 pub mod error;
 pub mod harness;
+pub mod manifest;
 
 pub use bundle::Bundle;
 pub use component::{ComponentKind, ComponentState};
+pub use environment::AgentEnvironment;
 pub use error::DomainError;
 pub use harness::HarnessId;
+pub use manifest::Manifest;

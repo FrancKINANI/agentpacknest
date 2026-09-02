@@ -18,7 +18,7 @@ pub fn copy_dir_recursive(
     dst: &Path,
     force: bool,
     label: &str,
-    ignore: Option<&crate::utils::ignore::IgnorePatterns>,
+    ignore: Option<&crate::infrastructure::ignore::IgnorePatterns>,
 ) -> Result<u64> {
     if !src.is_dir() {
         return Ok(0);

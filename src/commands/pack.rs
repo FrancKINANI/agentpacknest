@@ -2,12 +2,12 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::core::manifest;
+use crate::domain::manifest;
 use crate::harness::pi::detect::PiInstallation;
 use crate::harness::types::HarnessAdapter;
+use crate::infrastructure::ignore::IgnorePatterns;
 use crate::security::crypto;
 use crate::security::signing;
-use crate::utils::ignore::IgnorePatterns;
 
 /// Execute `pn pack`.
 #[allow(clippy::too_many_arguments)]

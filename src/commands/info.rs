@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 
-use crate::core::manifest;
+use crate::domain::manifest;
 use crate::security::signing;
 
 /// Verify the manifest signature against the bundle's manifest.sig.
