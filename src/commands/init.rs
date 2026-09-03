@@ -2,9 +2,10 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::domain::harness::HarnessId;
 use crate::domain::manifest;
-use crate::harness::pi::detect::PiInstallation;
-use crate::harness::types::HarnessAdapter;
+use crate::harness::registry::HarnessRegistry;
+use crate::harness::traits::HarnessContext;
 
 pub fn execute(
     harness: String,
@@ -13,18 +14,27 @@ pub fn execute(
     output: Option<String>,
 ) -> Result<()> {
     // ── 1. Validate harness ────────────────────────────────────────
-    if harness != "pi" {
+    let id = HarnessId::from_name(&harness)
+        .ok_or_else(|| anyhow::anyhow!("unsupported harness: `{}`", harness))?;
+
+    if !id.is_fully_supported() {
         bail!(
             "unsupported harness: `{}`\n  supported harnesses: pi\n  hint: only 'pi' is available in pn v0.1",
             harness
         );
     }
 
-    // ── 2. Detect Pi installation ──────────────────────────────────
-    let pi_path = path.map(PathBuf::from);
-    let pi = PiInstallation::detect(pi_path).context("failed to detect Pi installation")?;
+    // ── 2. Detect the harness installation ─────────────────────────
+    let registry = HarnessRegistry::with_defaults();
+    let adapter = registry
+        .get(id)
+        .context("failed to resolve harness adapter")?;
+    let context = HarnessContext::new(path.map(PathBuf::from));
+    let detected = adapter
+        .detect(&context)
+        .context("failed to detect harness installation")?;
 
-    println!("Detected Pi v{}", pi.version());
+    println!("Detected {} v{}", id, detected.version);
 
     // ── 3. Resolve output directory ────────────────────────────────
     let agent_name = name.unwrap_or_else(|| "my-agent".to_string());
@@ -54,18 +64,22 @@ pub fn execute(
 
     for dir in &dirs {
         fs::create_dir_all(out_dir.join(dir)).with_context(|| {
-            format!("failed to create directory: {}/{}", out_dir.display(), dir)
+            format!(
+                "failed to create directory: {}/{}\n",
+                out_dir.display(),
+                dir
+            )
         })?;
     }
 
     println!("Created bundle structure in {}/", out_dir.display());
 
     // ── 5. Generate manifest.yaml ──────────────────────────────────
-    let mut m = manifest::default_pi(&agent_name, pi.version());
+    let mut m = manifest::default_pi(&agent_name, &detected.version);
 
     // Fill in the runtime requirement with detected version
     if let Some(req) = m.runtime.required.first_mut() {
-        req.min_version = pi.version().to_string();
+        req.min_version = detected.version.clone();
     }
 
     let manifest_path = out_dir.join("manifest.yaml");
@@ -76,7 +90,7 @@ pub fn execute(
     // ── 6. Summary ─────────────────────────────────────────────────
     println!();
     println!("Bundle '{}' initialized successfully!", agent_name);
-    println!("  Harness:    pi v{}", pi.version());
+    println!("  Harness:    {} v{}", id, detected.version);
     println!("  Output:     {}/", out_dir.display());
     println!();
     println!("Next steps:");

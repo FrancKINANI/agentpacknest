@@ -31,9 +31,9 @@ graph TD
     DOM[Domain Layer<br/>Pure types & validation:<br/>Manifest, Bundle, Component,<br/>Environment, HarnessId<br/>NO dependencies]
 
     %% Harness Layer
-    HARNESS_TRAITS[harness/types.rs<br/>Harness trait + HarnessAdapter]
+    HARNESS_TRAITS[harness/traits.rs<br/>Harness contract: detect/discover/prepare_runtime]
     HARNESS_PI[harness/pi/<br/>detect.rs, harness.rs]
-    HARNESS_AIDER[harness/aider/<br/>detect.rs, harness.rs,<br/>paths.rs, launch.rs]
+    HARNESS_AIDER[harness/aider/<br/>harness.rs, paths.rs, launch.rs]
     HARNESS_REG[harness/registry.rs]
 
     HARNESS[Harness Layer<br/>Adapter implementations:<br/>Pi = production<br/>Aider = skeleton (detection only)<br/>Core knows trait only]

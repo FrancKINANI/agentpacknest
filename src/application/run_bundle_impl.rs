@@ -9,6 +9,8 @@ use std::process::Command;
 
 use crate::application::run_bundle::{RunBundleRequest, RunResult};
 use crate::domain::manifest;
+use crate::harness::registry::HarnessRegistry;
+use crate::harness::traits::PrepareRuntimeRequest;
 use crate::security::crypto;
 use crate::security::integrity;
 use crate::security::secrets::SecretsBundle;
@@ -56,10 +58,16 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
     // The manifest may require a minimum agentpacknest version to read it.
     check_compatibility(&m)?;
 
-    // ── 6. Check runtime requirements ──────────────────────────────
-    if m.harness.name == "pi" {
-        check_node_version(20)?;
-    }
+    // ── 6. Resolve the harness and prepare the runtime ──────────────
+    // The harness owns its runtime prerequisites (Pi requires Node.js >= 20)
+    // and the final launch specification. `--allow-unverified` must NOT bypass
+    // runtime compatibility — it is structural, not trust.
+    let registry = HarnessRegistry::with_defaults();
+    let harness = registry.by_name(&m.harness.name)?;
+    let prepared = harness.prepare_runtime(PrepareRuntimeRequest {
+        bundle_root: bundle_dir.clone(),
+        launch: m.launch.clone(),
+    })?;
 
     // ── 7. Decrypt secrets (in memory only) ────────────────────────
     let secrets = if m.security.secrets_encrypted {
@@ -89,7 +97,7 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
     let run_workdir = match request.workdir {
         Some(w) => PathBuf::from(w),
         None => {
-            let wd = bundle_dir.join(m.launch.working_directory.as_deref().unwrap_or("."));
+            let wd = bundle_dir.join(prepared.working_directory.as_deref().unwrap_or("."));
             // A manifest-provided working directory must stay inside the bundle.
             // This is a structural check: `--allow-unverified` cannot override it.
             ensure_inside_bundle(&bundle_dir, &wd)?;
@@ -108,14 +116,10 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
     let env_vars = build_env(&bundle_dir, &m, secrets.as_ref());
 
     // ── 10. Resolve command ────────────────────────────────────────
-    // Use structured launch.args (v0.1.1+) with fallback to legacy split_whitespace
-    let cmd_name = &m.launch.command;
-    let mut cmd_args: Vec<&str> = if !m.launch.args.is_empty() {
-        m.launch.args.iter().map(|s| s.as_str()).collect()
-    } else {
-        // Legacy: split command string on whitespace
-        m.launch.command.split_whitespace().skip(1).collect()
-    };
+    // The harness returned the final command/args (launch spec resolution
+    // already happened in prepare_runtime).
+    let cmd_name = &prepared.command;
+    let mut cmd_args: Vec<&str> = prepared.args.iter().map(|s| s.as_str()).collect();
     cmd_args.extend(request.args.iter().map(|s| s.as_str()));
 
     // ── 11. Dry run or execute ─────────────────────────────────────
@@ -516,47 +520,6 @@ fn run_command(
         .with_context(|| format!("failed to execute: {}", cmd))?;
 
     Ok(status.code().unwrap_or(1))
-}
-
-// ---------------------------------------------------------------------------
-// Runtime checks
-// ---------------------------------------------------------------------------
-
-/// Check that a command is available and meets a minimum major version.
-/// For now only `node >= 20` is checked (Pi harness).
-fn check_node_version(min_major: u32) -> Result<()> {
-    let output = Command::new("node").arg("--version").output().context(
-        "Node.js is not installed or not in PATH\n  \
-             Pi requires Node.js >= 20\n  \
-             install: https://nodejs.org/ or use `nvm install 20`",
-    )?;
-
-    if !output.status.success() {
-        bail!(
-            "failed to run `node --version`\n  \
-             Pi requires Node.js >= 20\n  \
-             install: https://nodejs.org/"
-        );
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let version_str = stdout.trim().trim_start_matches('v');
-
-    let parts: Vec<&str> = version_str.split('.').collect();
-    let major: u32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
-
-    if major < min_major {
-        bail!(
-            "Node.js v{} detected, but Pi requires >= v{}.0\n  \
-             upgrade: https://nodejs.org/ or `nvm install {}`",
-            version_str,
-            min_major,
-            min_major
-        );
-    }
-
-    println!("Node.js:   v{} ✓", version_str);
-    Ok(())
 }
 
 #[cfg(test)]

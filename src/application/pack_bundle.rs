@@ -1,12 +1,19 @@
 //! PackBundle — orchestrate packing a bundle from a harness installation.
+//!
+//! The application layer owns the *pack sequence*; the harness owns the
+//! *vocabulary*. Pi-specific knowledge (which dirs are components, where
+//! packages live, what the secret sources are) comes from
+//! [`PortableEnvironment`] returned by the harness — never hardcoded here.
 
 use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::manifest;
-use crate::harness::pi::detect::PiInstallation;
-use crate::harness::types::HarnessAdapter;
+use crate::harness::registry::HarnessRegistry;
+use crate::harness::traits::{
+    HarnessContext, PortableComponent, PortableEnvironment, PortableKind, SecretFormat,
+};
 use crate::infrastructure::ignore::IgnorePatterns;
 use crate::security::crypto;
 use crate::security::integrity;
@@ -46,25 +53,25 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
     // ── 2. Load and validate manifest ──────────────────────────────
     let mut m = manifest::load(&manifest_path).context("failed to load manifest")?;
 
-    if m.harness.name != "pi" {
-        bail!(
-            "unsupported harness in manifest: `{}`\n  only 'pi' is supported in pn v0.1\n  hint: this bundle was created for a different harness",
-            m.harness.name
-        );
-    }
+    // ── 3. Resolve the harness from the manifest via the registry ──
+    let registry = HarnessRegistry::with_defaults();
+    let harness = registry.by_name(&m.harness.name)?;
+
+    let context = HarnessContext::new(request.harness_path.clone());
 
     println!("Bundle:     {}", m.bundle.name);
-    println!("Harness:    pi v{}", m.harness.version);
+    println!("Harness:    {} v{}", m.harness.name, m.harness.version);
 
-    // ── 3. Detect Pi installation ──────────────────────────────────
-    let pi =
-        PiInstallation::detect(request.harness_path).context("failed to detect Pi installation")?;
+    // ── 4. Discover the portable environment ──────────────────────
+    let env = harness
+        .discover(&context)
+        .context("failed to discover harness environment")?;
 
-    println!("Pi source:  {}", pi.root().display());
+    println!("Source:     {}", env.source_root.display());
     println!();
 
-    // ── 4. Load ignore patterns ────────────────────────────────────
-    let ignore = IgnorePatterns::load(pi.root());
+    // ── 5. Load ignore patterns ────────────────────────────────────
+    let ignore = IgnorePatterns::load(&env.source_root);
     if !ignore.is_empty() {
         println!(
             "Ignore:     {} pattern(s) from .agentpacknestignore",
@@ -73,73 +80,56 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
         println!();
     }
 
-    // ── 5. Copy files ──────────────────────────────────────────────
+    // ── 6. Copy components selected by flags ───────────────────────
+    let mut secrets_written = false;
+
     if request.with_config {
-        // Config source is the Pi agent root: copy loose config files only.
-        // Component directories (sessions, skills, ...) and secret sources
-        // (auth.json, .env files) are excluded — they are handled by their
-        // own pack flags and must never appear as plaintext in the payload.
-        copy_dir_recursive(
-            &pi.config_path(),
-            &bundle_dir.join("agent/config"),
+        copy_kind(
+            &env,
+            PortableKind::Config,
+            bundle_dir,
             request.force,
-            "config",
             &ignore,
-            &[
-                // component directories (packed via their own flags)
-                "sessions",
-                "skills",
-                "themes",
-                "extensions",
-                "packages",
-                "prompts",
-                "npm",
-                "git",
-                "secrets",
-                // secret-source files — must only ever exist encrypted
-                "auth.json",
-                "secrets.json",
-                ".env",
-                "env",
-            ],
         )?;
     }
-
     if request.with_memory {
-        copy_dir_recursive(
-            &pi.memory_path(),
-            &bundle_dir.join("agent/memory"),
+        copy_kind(
+            &env,
+            PortableKind::Memory,
+            bundle_dir,
             request.force,
-            "memory",
             &ignore,
-            &[],
         )?;
     }
-
     if request.with_skills {
-        copy_packages(&pi, bundle_dir, request.force, &ignore)?;
+        for kind in [
+            PortableKind::Extensions,
+            PortableKind::Skills,
+            PortableKind::Themes,
+        ] {
+            copy_kind(&env, kind, bundle_dir, request.force, &ignore)?;
+        }
     }
-
     if request.with_secrets {
-        copy_secrets_encrypted(&pi, bundle_dir, request.force)?;
+        secrets_written = pack_secrets(&env, bundle_dir, request.force)?;
     }
 
-    // ── 6. Update manifest contents ────────────────────────────────
+    // ── 7. Update manifest contents ────────────────────────────────
     m.contents.config = request.with_config;
     m.contents.memory = request.with_memory;
     m.contents.skills = request.with_skills;
     m.contents.secrets = request.with_secrets;
 
     if request.with_skills {
-        m.packages = scan_packages(&pi);
+        m.packages = scan_packages_from_bundle(bundle_dir);
     }
 
-    if request.with_secrets {
+    if secrets_written {
         m.security.secrets_encrypted = true;
         m.security.encryption = Some(crypto::CRYPTO_FORMAT_IDENTIFIER.to_string());
     }
 
-    // ── 7. Compute integrity checksum ──────────────────────────────
+    // ── 8. Compute integrity checksum ──────────────────────────────
     let checksum = integrity::compute_bundle_checksum(bundle_dir)?;
     m.integrity.checksum = Some(checksum.clone());
     m.integrity.format_version = integrity::INTEGRITY_FORMAT_VERSION;
@@ -167,13 +157,13 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
         source_state_hash: None, // TODO: compute source state hash
     });
 
-    // ── 8. Save manifest ───────────────────────────────────────────
+    // ── 9. Save manifest ───────────────────────────────────────────
     manifest::save(&manifest_path, &m).context("failed to save updated manifest")?;
 
     println!();
     println!("  ✓ manifest.yaml updated (checksum: {})", &checksum[..16]);
 
-    // ── 9. Sign the manifest ───────────────────────────────────────
+    // ── 10. Sign the manifest ──────────────────────────────────────
     let signature = signing::sign_canonical_manifest(&m)
         .context("failed to sign manifest — is your keypair set up?")?;
 
@@ -185,7 +175,7 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
 
     println!("  ✓ manifest signed");
 
-    // ── 10. Validate the completed bundle ──────────────────────────
+    // ── 11. Validate the completed bundle ──────────────────────────
     // Re-verify checksum
     let reverify = integrity::verify_checksum(bundle_dir, &checksum)
         .context("post-pack integrity verification failed")?;
@@ -226,24 +216,57 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
 }
 
 // ---------------------------------------------------------------------------
-// Copy helpers (moved from commands/pack.rs)
+// Component-driven copy
 // ---------------------------------------------------------------------------
 
-/// Copy a directory tree recursively. Skips if source doesn't exist.
-/// Files matching ignore patterns are skipped.
-fn copy_dir_recursive(
-    src: &Path,
-    dst: &Path,
+/// Copy every component of the given kind that the harness discovered.
+fn copy_kind(
+    env: &PortableEnvironment,
+    kind: PortableKind,
+    bundle_dir: &Path,
     force: bool,
-    label: &str,
     ignore: &IgnorePatterns,
-    excluded_names: &[&str],
 ) -> Result<()> {
+    for component in env.components.iter().filter(|c| c.kind == kind) {
+        copy_component(component, bundle_dir, force, ignore)?;
+    }
+    Ok(())
+}
+
+/// Copy a single portable directory component into the bundle.
+///
+/// Core policy (independent of the harness):
+/// - Secret-source files (`auth.json`, `secrets.json`, `.env`, `env`, `*.env`)
+///   are NEVER copied as plaintext — the harness declares them separately and
+///   Core encrypts them instead.
+/// - Symlinks are rejected (they could point outside the source tree).
+/// - Ignore patterns from `.agentpacknestignore` are respected.
+///
+/// Harness vocabulary (comes from `component.excludes`):
+/// - non-portable sub-directory names inside the component's tree.
+fn copy_component(
+    component: &PortableComponent,
+    bundle_dir: &Path,
+    force: bool,
+    ignore: &IgnorePatterns,
+) -> Result<()> {
+    let src = &component.source;
     if !src.is_dir() {
-        println!("  ⚠ {} not found in Pi installation, skipping", label);
+        if component.required {
+            bail!(
+                "required component '{}' is missing: {}\n  hint: check the harness installation",
+                component.destination.display(),
+                src.display()
+            );
+        }
+        println!(
+            "  ⚠ {} not found in harness installation, skipping",
+            component.destination.display()
+        );
         return Ok(());
     }
 
+    let dst = bundle_dir.join(&component.destination);
     if dst.exists() && !force {
         bail!(
             "destination already exists: {}\n  use --force to overwrite",
@@ -269,8 +292,11 @@ fn copy_dir_recursive(
         let rel = entry.path().strip_prefix(src).unwrap();
         let rel_str = rel.to_string_lossy();
 
-        // Exclude source directories and secret files from plaintext copies
-        if is_excluded(&rel_str, excluded_names) {
+        // Skip any path segment that is a non-portable (excluded) name.
+        // Directory components whose dir-name appears deeper in the tree are
+        // also excluded — the walker is not pruned, so nested files under an
+        // excluded dir are individually skipped.
+        if is_excluded_path(&rel_str, &component.excludes) {
             skipped += 1;
             continue;
         }
@@ -297,34 +323,40 @@ fn copy_dir_recursive(
     if skipped > 0 {
         println!(
             "  ✓ {} copied ({} files, {} excluded/ignored)",
-            label, count, skipped
+            component.destination.display(),
+            count,
+            skipped
         );
     } else {
-        println!("  ✓ {} copied ({} files)", label, count);
+        println!(
+            "  ✓ {} copied ({} files)",
+            component.destination.display(),
+            count
+        );
     }
     Ok(())
 }
 
-/// True when any path segment is in `excluded_names`, or the file is a
-/// secret-source file (`*.env`, `.env`, `env`, auth-style JSON).
-fn is_excluded(rel: &str, excluded_names: &[&str]) -> bool {
+/// True when any segment of the relative path is an excluded name, or the
+/// path's final name is a secret-source file that must never be copied as
+/// plaintext (Core security policy: `auth.json`, `secrets.json`, `.env`,
+/// `env`, `*.env`).
+fn is_excluded_path(rel: &str, excluded: &[String]) -> bool {
     let segments: Vec<&str> = rel.split('/').collect();
     let filename = segments.last().copied().unwrap_or("");
 
-    // Directory segment match (excluding the file itself is handled below)
-    if segments.len() > 1 {
-        for seg in &segments[..segments.len() - 1] {
-            if excluded_names.contains(seg) {
-                return true;
-            }
-        }
-    }
-
-    if excluded_names.contains(&filename) {
+    // Excluded component names match any segment (dir or file name).
+    if segments.iter().any(|seg| excluded.iter().any(|e| e == seg)) {
         return true;
     }
 
-    // .env style files, regardless of exact name
+    // Secret-source file names are excluded at the file level only.
+    is_secret_source_file(filename)
+}
+
+/// True when a filename is a secret-source file that must never be copied
+/// as plaintext. This is Core policy, applied to every plaintext copy.
+fn is_secret_source_file(filename: &str) -> bool {
     filename == ".env"
         || filename == "env"
         || filename.ends_with(".env")
@@ -332,121 +364,41 @@ fn is_excluded(rel: &str, excluded_names: &[&str]) -> bool {
         || filename == "secrets.json"
 }
 
-/// Copy packages (extensions, skills, themes) from Pi into bundle.
-/// Files matching ignore patterns are skipped.
-fn copy_packages(
-    pi: &PiInstallation,
-    bundle_dir: &Path,
-    force: bool,
-    ignore: &IgnorePatterns,
-) -> Result<()> {
-    let src = pi.packages_path();
-    if !src.is_dir() {
-        println!("  ⚠ packages/ not found in Pi installation, skipping");
-        return Ok(());
+#[cfg(test)]
+mod exclusion_tests {
+    use super::*;
+
+    #[test]
+    fn excluded_dir_names_match_any_segment() {
+        let excluded = vec!["sessions".to_string(), "packages".to_string()];
+        assert!(is_excluded_path("sessions", &excluded));
+        assert!(is_excluded_path("sessions/2025-01-15.jsonl", &excluded));
+        assert!(is_excluded_path("deep/nested/packages/x", &excluded));
+        assert!(!is_excluded_path("settings.json", &excluded));
+        assert!(!is_excluded_path("skills/coding/prompt.md", &excluded));
     }
 
-    let dst_base = bundle_dir.join("agent/packages");
-    let mut total = 0u64;
-
-    for sub in &["extensions", "skills", "themes"] {
-        let sub_src = src.join(sub);
-        let sub_dst = dst_base.join(sub);
-
-        if sub_src.is_dir() {
-            if sub_dst.exists() && !force {
-                bail!(
-                    "destination already exists: {}\n  use --force to overwrite",
-                    sub_dst.display()
-                );
-            }
-
-            let walker = walkdir::WalkDir::new(&sub_src)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok());
-            for entry in walker {
-                // Reject symlinks
-                if entry.file_type().is_symlink() {
-                    bail!("symlink not allowed in bundle: {}", entry.path().display());
-                }
-
-                let rel = entry.path().strip_prefix(&sub_src).unwrap();
-                let rel_str = rel.to_string_lossy();
-
-                // Secret-source files must never be copied as plaintext
-                if is_excluded(&rel_str, &["auth.json", "secrets.json", ".env", "env"]) {
-                    continue;
-                }
-
-                // Check ignore patterns
-                if !ignore.is_empty() && ignore.is_ignored(&rel_str) {
-                    continue;
-                }
-
-                let target = sub_dst.join(rel);
-                if entry.file_type().is_dir() {
-                    fs::create_dir_all(&target)?;
-                } else {
-                    if let Some(parent) = target.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::copy(entry.path(), &target)?;
-                    total += 1;
-                }
-            }
-        }
-    }
-
-    println!("  ✓ packages copied ({} files)", total);
-    Ok(())
-}
-
-/// Scan Pi packages and return manifest entries.
-fn scan_packages(pi: &PiInstallation) -> manifest::Packages {
-    let src = pi.packages_path();
-    let mut ext = Vec::new();
-    let mut skills = Vec::new();
-    let mut themes = Vec::new();
-
-    for (sub, list) in [
-        ("extensions", &mut ext),
-        ("skills", &mut skills),
-        ("themes", &mut themes),
-    ] {
-        let dir = src.join(sub);
-        if dir.is_dir() {
-            if let Ok(entries) = fs::read_dir(&dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                        let name = entry.file_name().to_string_lossy().into_owned();
-                        list.push(manifest::PackageEntry {
-                            name,
-                            version: "0.0.0".to_string(),
-                            source: None,
-                            path: None,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    manifest::Packages {
-        extensions: ext,
-        skills,
-        themes,
+    #[test]
+    fn secret_source_files_always_excluded() {
+        let excluded: Vec<String> = Vec::new();
+        assert!(is_excluded_path("auth.json", &excluded));
+        assert!(is_excluded_path(".env", &excluded));
+        assert!(is_excluded_path("prod.env", &excluded));
+        assert!(is_excluded_path("nested/secrets.json", &excluded));
+        assert!(!is_excluded_path("settings.json", &excluded));
+        assert!(!is_excluded_path("prompt.md", &excluded));
     }
 }
 
-/// Collect secrets from the Pi installation and write them encrypted to keys.enc.
+// ---------------------------------------------------------------------------
+// Secrets (Core-owned encryption of harness-declared SecretSource components)
+// ---------------------------------------------------------------------------
+
+/// Collect secrets from every [`PortableKind::SecretSource`] component the
+/// harness described, encrypt them, and write them to `secrets/keys.enc`.
 ///
-/// Secret sources (scanned in order):
-/// 1. `secrets/` directory — each file becomes key=filename, value=content
-/// 2. `.env` / `*.env` files — parsed as key=value lines
-///
-/// **No plaintext is written to disk.**
-fn copy_secrets_encrypted(pi: &PiInstallation, bundle_dir: &Path, force: bool) -> Result<()> {
+/// Returns `true` when an encrypted file was actually written.
+fn pack_secrets(env: &PortableEnvironment, bundle_dir: &Path, force: bool) -> Result<bool> {
     let secrets_dst = bundle_dir.join("secrets/keys.enc");
 
     if secrets_dst.exists() && !force {
@@ -456,19 +408,30 @@ fn copy_secrets_encrypted(pi: &PiInstallation, bundle_dir: &Path, force: bool) -
     // ── Collect secrets ────────────────────────────────────────────
     let mut bundle = SecretsBundle::new();
 
-    // 1. Pi auth.json (API keys / credentials) — one secret per JSON key
-    bundle.scan_auth_json(&pi.auth_path())?;
-
-    // 2. Scan secrets/ directory for key files
-    bundle.scan_secret_files(&pi.root().join("secrets"))?;
-
-    // 3. Scan .env files at root and in config/
-    bundle.scan_env_files(pi.root())?;
-    bundle.scan_env_files(&pi.root().join("config"))?;
+    for component in env
+        .components
+        .iter()
+        .filter(|c| c.kind == PortableKind::SecretSource)
+    {
+        let format = component
+            .secret_format
+            .expect("SecretSource component without a SecretFormat — harness bug");
+        match format {
+            SecretFormat::AuthJsonFile => {
+                bundle.scan_auth_json(&component.source)?;
+            }
+            SecretFormat::DotEnvDir => {
+                bundle.scan_env_files(&component.source)?;
+            }
+            SecretFormat::KeyFileDir => {
+                bundle.scan_secret_files(&component.source)?;
+            }
+        }
+    }
 
     if bundle.is_empty() {
-        println!("  ⚠ no secrets found in Pi installation, skipping");
-        return Ok(());
+        println!("  ⚠ no secrets found in harness installation, skipping");
+        return Ok(false);
     }
 
     println!(
@@ -495,7 +458,41 @@ fn copy_secrets_encrypted(pi: &PiInstallation, bundle_dir: &Path, force: bool) -
         "  ✓ secrets encrypted → secrets/keys.enc ({} bytes)",
         file_size
     );
-    Ok(())
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
+// Manifest package listing (Core reads back what was copied)
+// ---------------------------------------------------------------------------
+
+/// Build the manifest `packages` section from what actually landed in the
+/// bundle under `agent/packages/{extensions,skills,themes}`.
+fn scan_packages_from_bundle(bundle_dir: &Path) -> manifest::Packages {
+    let base = bundle_dir.join("agent/packages");
+    let read = |sub: &str| -> Vec<manifest::PackageEntry> {
+        let dir = base.join(sub);
+        let mut entries = Vec::new();
+        if let Ok(rd) = fs::read_dir(&dir) {
+            for entry in rd.filter_map(|e| e.ok()) {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    entries.push(manifest::PackageEntry {
+                        name: entry.file_name().to_string_lossy().into_owned(),
+                        version: "0.0.0".to_string(),
+                        source: None,
+                        path: None,
+                    });
+                }
+            }
+        }
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        entries
+    };
+
+    manifest::Packages {
+        extensions: read("extensions"),
+        skills: read("skills"),
+        themes: read("themes"),
+    }
 }
 
 fn flag(v: bool) -> &'static str {
@@ -519,7 +516,7 @@ mod tests {
         }
     }
 
-    /// Build a fake Pi agent directory.
+    /// Build a fake Pi agent directory matching the harness layout.
     fn fake_pi(dir: &Path) {
         fs::create_dir_all(dir.join("sessions")).unwrap();
         fs::create_dir_all(dir.join("packages/skills/coding")).unwrap();

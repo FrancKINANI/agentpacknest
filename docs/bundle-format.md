@@ -89,7 +89,7 @@ The current implementation (v0.1.x) uses a slightly different layout at the bund
 - `agent/packages/themes/` ← `~/.pi/agent/packages/themes/`
 - `secrets/keys.enc` ← `~/.pi/agent/auth.json` + `.env` files → encrypted
 
-**Future harnesses** must define their portable component mapping explicitly in their `HarnessAdapter` implementation.
+**Future harnesses** must define their portable component mapping explicitly in their `Harness::discover()` implementation (`src/harness/traits.rs`).
 
 ---
 
@@ -642,7 +642,7 @@ Command::new(&manifest.launch.command)
 │  • manifest.rs        │ │  • pi/        │ │  • filesystem.rs      │
 │  • bundle.rs          │ │  • aider/     │ │  • archive.rs         │
 │  • component.rs       │ │  • traits.rs  │ │  • ignore.rs          │
-│  • environment.rs     │ │  • types.rs   │ │  • process.rs         │
+│  • environment.rs     │ │  • registry.rs│ │  • process.rs         │
 │  • harness.rs         │ │               │ │  • bundle_store.rs    │
 └───────────────────────┘ └───────────────┘ └───────────────────────┘
               │               │               │
