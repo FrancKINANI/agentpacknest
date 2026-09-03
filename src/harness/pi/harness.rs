@@ -146,22 +146,7 @@ impl Harness for PiHarness {
         // compatibility is structural, not trust).
         check_node_version(20)?;
 
-        // Resolve the launch spec. Manifests created by `pn init` carry
-        // structured args; legacy (schema 0.1) manifests may embed args in
-        // the command string. When that happens the command is reduced to the
-        // executable name and the embedded args are split out, so the final
-        // PreparedRuntime keeps the executable and its arguments structurally
-        // separated (never `Command::new("pi --agent-dir agent")`).
-        let mut command = request.launch.command.clone();
-        let args: Vec<String> = if request.launch.args.is_empty() {
-            let mut parts: Vec<String> = command.split_whitespace().map(String::from).collect();
-            if !parts.is_empty() {
-                command = parts.remove(0);
-            }
-            parts
-        } else {
-            request.launch.args.clone()
-        };
+        let (command, args) = resolve_launch(&request.launch.command, &request.launch.args)?;
 
         Ok(PreparedRuntime {
             command,
@@ -169,6 +154,62 @@ impl Harness for PiHarness {
             working_directory: request.launch.working_directory.clone(),
         })
     }
+}
+
+/// Resolve a manifest launch spec into a structurally separated
+/// `(executable, args)` pair — never a shell-parsed command line.
+///
+/// Canonical (current) manifests carry a bare executable in
+/// `launch.command` and a structured `launch.args` vector; those boundaries
+/// are preserved exactly, including arguments that contain spaces.
+///
+/// Combined command strings (arguments embedded in `launch.command` with an
+/// empty `launch.args`) are inherently ambiguous — whitespace cannot
+/// distinguish an argument boundary from a space inside an argument — so
+/// they are refused with a clear re-pack error. No naive whitespace
+/// reconstruction and no shell semantics (quoting, escapes) are ever
+/// applied.
+fn resolve_launch(command: &str, args: &[String]) -> Result<(String, Vec<String>)> {
+    let command_has_whitespace = command.chars().any(|c| c.is_whitespace());
+
+    // ── Canonical: structured args present ─────────────────────────
+    if !args.is_empty() {
+        if command_has_whitespace {
+            bail!(
+                "launch.command contains embedded arguments while launch.args is also set:\n  \
+                 command: '{}'\n  \
+                 hint: put the executable in launch.command and its arguments in launch.args\n  \
+                 (re-run `pn pack` or edit manifest.yaml)",
+                command
+            );
+        }
+        // The structured argument vector is preserved exactly — including
+        // arguments that contain spaces.
+        return Ok((command.to_string(), args.to_vec()));
+    }
+
+    // ── No structured args ─────────────────────────────────────────
+    if command.trim().is_empty() {
+        bail!(
+            "launch.command contains no executable: '{}'\n  hint: set launch.command in manifest.yaml",
+            command
+        );
+    }
+    if command_has_whitespace {
+        // A combined command string with no structured launch.args cannot
+        // preserve argument boundaries (an argument containing a space is
+        // indistinguishable from two arguments). Refuse rather than guess.
+        bail!(
+            "cannot safely run this bundle: launch.command contains embedded arguments but launch.args is empty:\n  \
+             command: '{}'\n  \
+             a combined command string cannot preserve argument boundaries\n  \
+             hint: re-run `pn pack` to write structured launch.command + launch.args, or edit manifest.yaml",
+            command
+        );
+    }
+
+    // Bare executable — no parsing needed.
+    Ok((command.to_string(), Vec::new()))
 }
 
 /// Check that a command is available and meets a minimum major version.
@@ -289,6 +330,86 @@ mod tests {
         let harness = PiHarness::new();
         let ctx = HarnessContext::new(Some(PathBuf::from("/nonexistent")));
         assert!(harness.discover(&ctx).is_err());
+    }
+
+    // ── resolve_launch: structured args are preserved exactly ──────
+
+    #[test]
+    fn structured_args_preserved_exactly() {
+        let args = vec![
+            "--agent-dir".to_string(),
+            "agent".to_string(),
+            "--name".to_string(),
+            "hello world".to_string(),
+        ];
+        let (command, out_args) = resolve_launch("pi", &args).unwrap();
+        assert_eq!(command, "pi");
+        // Argument boundaries must survive unchanged — including the space
+        // inside "hello world" (still one argument).
+        assert_eq!(out_args, args);
+    }
+
+    #[test]
+    fn args_with_spaces_remain_one_argument() {
+        let args = vec!["--message".to_string(), "two words here".to_string()];
+        let (_, out_args) = resolve_launch("pi", &args).unwrap();
+        assert_eq!(out_args.len(), 2);
+        assert_eq!(out_args[1], "two words here");
+    }
+
+    #[test]
+    fn bare_executable_without_args() {
+        let (command, args) = resolve_launch("pi", &[]).unwrap();
+        assert_eq!(command, "pi");
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn structured_args_with_embedded_command_rejected() {
+        let err = resolve_launch("pi --agent-dir agent", &["--agent-dir".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("launch.command contains embedded arguments"),
+            "{}",
+            err
+        );
+    }
+
+    // ── resolve_launch: combined command strings are refused, never parsed ──
+
+    #[test]
+    fn embedded_args_without_structured_args_refused() {
+        // Even "clean" embedded args cannot be distinguished from an
+        // argument containing a space — refuse with a re-pack error.
+        let err = resolve_launch("pi --agent-dir agent", &[])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot safely run this bundle") && err.contains("re-run `pn pack`"),
+            "embedded args must be refused, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn quoted_embedded_args_refused_too() {
+        // No shell semantics anywhere: quote characters are not interpreted,
+        // the string is still refused as ambiguous.
+        let err = resolve_launch("pi --name \"hello world\"", &[])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot safely run this bundle"),
+            "quoted embedded args must be refused, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn whitespace_only_command_fails_clearly() {
+        let err = resolve_launch("   ", &[]).unwrap_err().to_string();
+        assert!(err.contains("no executable"), "{}", err);
     }
 
     use std::path::Path;

@@ -2,7 +2,7 @@
 
 **Version**: 1.0 (Bundle Format v1)
 **Manifest Schema**: 0.2
-**AgentPackNest Application**: 0.1.2
+**AgentPackNest Application**: 0.2.0
 
 ---
 
@@ -104,7 +104,7 @@ by `PiHarness::discover()` (`src/harness/pi/harness.rs`) and consumed by Core:
 schema_version: "0.2"
 
 # REQUIRED: AgentPackNest version that created this manifest
-agentpacknest_version: "0.1.2"
+agentpacknest_version: "0.2.0"
 
 # REQUIRED: Bundle format version (increments on structural changes)
 bundle_version: 1
@@ -210,7 +210,7 @@ The following version concepts are **independent** and must not be conflated:
 
 | Concept | Field | Current Value | Purpose |
 |---------|-------|---------------|---------|
-| AgentPackNest Application | `agentpacknest_version` | "0.1.2" | Version of the `pn` binary |
+| AgentPackNest Application | `agentpacknest_version` | "0.2.0" | Version of the `pn` binary |
 | Bundle Format | `bundle_version` | 1 | Structural layout of bundle directory |
 | Manifest Schema | `schema_version` | "0.2" | YAML schema of manifest.yaml |
 | Integrity Format | `integrity.format_version` | 1 | How payload checksum is computed |
