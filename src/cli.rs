@@ -129,6 +129,8 @@ pub enum Commands {
             pn run .\n\
         \n  Preview without executing:\n    \
             pn run . --dry-run\n\
+        \n  Warn only when the bundle is older than 30 days:\n    \
+            pn run . --max-age 30d\n\
         \n  Run with a custom working directory:\n    \
             pn run . --workdir /tmp/agent-workspace\n\
         \n  Pass the passphrase via flag (less secure):\n    \
@@ -154,6 +156,10 @@ pub enum Commands {
         /// Allow running without integrity/sig verification (NOT RECOMMENDED)
         #[arg(long)]
         allow_unverified: bool,
+
+        /// Maximum bundle age before pn run warns — 7d, 24h, 2w, or a bare number of days (default: 7d; AGENTPACKNEST_MAX_AGE also works)
+        #[arg(long, value_name = "DURATION")]
+        max_age: Option<String>,
 
         /// Extra arguments passed to the agent command
         #[arg(trailing_var_arg = true)]

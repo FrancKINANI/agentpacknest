@@ -10,8 +10,6 @@ pub mod unlock;
 use crate::application::run_bundle::RunResult;
 use crate::cli::{Cli, Commands};
 use anyhow::Result;
-use std::env;
-use std::path::PathBuf;
 
 pub fn dispatch(cli: Cli) -> Result<Option<RunResult>> {
     match cli.command {
@@ -56,19 +54,18 @@ pub fn dispatch(cli: Cli) -> Result<Option<RunResult>> {
             workdir,
             dry_run,
             allow_unverified,
+            max_age,
             args,
         } => {
-            let request = crate::application::run_bundle::RunBundleRequest {
-                bundle_path: bundle
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| env::current_dir().unwrap()),
+            let result = run::execute(
+                bundle,
                 passphrase,
                 workdir,
                 dry_run,
                 allow_unverified,
                 args,
-            };
-            let result = crate::application::run_bundle::execute(request)?;
+                max_age,
+            )?;
             Ok(Some(result))
         }
         Commands::Decrypt { file } => {

@@ -51,7 +51,7 @@ pn run .
 |---|---|
 | `pn init` | Create a new bundle from a harness installation |
 | `pn pack` | Copy config, memory, skills, secrets into the bundle |
-| `pn run` | Launch the agent defined in the bundle |
+| `pn run` | Launch the agent defined in the bundle (warns when the bundle is stale) |
 | `pn info` | Display bundle metadata and reproducibility score |
 | `pn diff` | Compare bundle with local harness state |
 | `pn unlock` | Decrypt and inspect secrets (masked by default) |
@@ -78,7 +78,27 @@ pn diff . --path ~/.pi/agent
 
 # Rotate the secrets passphrase
 pn rekey .
+
+# Only warn when the bundle is older than 30 days
+pn run . --max-age 30d
 ```
+
+### Bundle freshness
+
+`pn run` prints a warning (never blocks) when the bundle was packed longer
+ago than the freshness threshold — **7 days by default**. Control the
+threshold per run with `--max-age`, or globally with the
+`AGENTPACKNEST_MAX_AGE` environment variable:
+
+```bash
+pn run . --max-age 30d                    # warn only after 30 days
+AGENTPACKNEST_MAX_AGE=24h pn run .         # warn after 24 hours
+```
+
+Durations accept `7d` (days), `24h` (hours), `2w` (weeks), or a bare number
+of days (`30`). The `--max-age` flag wins over the environment variable;
+with neither set, 7 days is used. The warning is advisory — it never stops
+execution — and `pn diff` shows what changed in the local harness.
 
 ## Bundle structure
 

@@ -69,7 +69,7 @@ accept before running a bundle.
 | **Environment pollution during run** | The agent process runs with `env_clear()`: only a whitelist of system vars, `AGENTPACKNEST_*` vars, and intentionally injected secrets are present. |
 | **Secret key-name injection** | Secret keys are validated against `[A-Za-z_][A-Za-z0-9_]*` before becoming environment variables. |
 | **Passphrase in process list** | `--passphrase` is documented as insecure; the interactive (masked) prompt is the default. |
-| **Stale bundle execution** | `pn run` warns when a bundle was packed more than 7 days ago; `pn diff` shows drift. |
+| **Stale bundle execution** | `pn run` warns when a bundle is older than the freshness threshold — 7 days by default, configurable via `pn run --max-age <duration>` or the `AGENTPACKNEST_MAX_AGE` env var (flag wins); `pn diff` shows drift. The warning is advisory and never blocks execution. |
 
 ## The `pn run` Security Policy (default)
 
