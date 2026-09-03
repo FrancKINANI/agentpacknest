@@ -163,21 +163,18 @@ impl Harness for PiHarness {
 /// `launch.command` and a structured `launch.args` vector; those boundaries
 /// are preserved exactly, including arguments that contain spaces.
 ///
-/// Legacy (schema 0.1) manifests predate `launch.args` and may embed
-/// arguments in the command string. That representation is lossy — it
-/// cannot express quoted arguments — so it is handled by an explicit,
-/// isolated tokenizer that refuses to guess when the string cannot be
-/// interpreted faithfully. No shell semantics (quoting, escapes) are ever
+/// Combined command strings (arguments embedded in `launch.command` with an
+/// empty `launch.args`) are inherently ambiguous — whitespace cannot
+/// distinguish an argument boundary from a space inside an argument — so
+/// they are refused with a clear re-pack error. No naive whitespace
+/// reconstruction and no shell semantics (quoting, escapes) are ever
 /// applied.
 fn resolve_launch(command: &str, args: &[String]) -> Result<(String, Vec<String>)> {
-    // Whitespace separates the executable from any embedded (legacy) args.
-    // This tokenization is purely structural — no shell semantics (quoting,
-    // escapes) are ever applied.
-    let tokens: Vec<&str> = command.split_whitespace().collect();
+    let command_has_whitespace = command.chars().any(|c| c.is_whitespace());
 
     // ── Canonical: structured args present ─────────────────────────
     if !args.is_empty() {
-        if tokens.len() > 1 {
+        if command_has_whitespace {
             bail!(
                 "launch.command contains embedded arguments while launch.args is also set:\n  \
                  command: '{}'\n  \
@@ -186,40 +183,33 @@ fn resolve_launch(command: &str, args: &[String]) -> Result<(String, Vec<String>
                 command
             );
         }
-        let executable = tokens.first().map(|s| s.to_string()).unwrap_or_default();
         // The structured argument vector is preserved exactly — including
         // arguments that contain spaces.
-        return Ok((executable, args.to_vec()));
+        return Ok((command.to_string(), args.to_vec()));
     }
 
     // ── No structured args ─────────────────────────────────────────
-    match tokens.len() {
-        0 => bail!(
+    if command.trim().is_empty() {
+        bail!(
             "launch.command contains no executable: '{}'\n  hint: set launch.command in manifest.yaml",
             command
-        ),
-        // Bare executable.
-        1 => Ok((tokens[0].to_string(), Vec::new())),
-        // Legacy (schema 0.1): args embedded in the command string. This
-        // form cannot express quoted arguments — failing clearly beats
-        // silently mis-splitting them.
-        _ => {
-            for token in &tokens {
-                if token.contains('"') || token.contains('\'') {
-                    bail!(
-                        "cannot safely interpret legacy launch.command containing quoted argument '{}':\n  \
-                         the legacy (schema 0.1) command string cannot express argument boundaries\n  \
-                         hint: re-run `pn pack` to write structured launch.args, or edit manifest.yaml",
-                        token
-                    );
-                }
-            }
-            Ok((
-                tokens[0].to_string(),
-                tokens[1..].iter().map(|s| s.to_string()).collect(),
-            ))
-        }
+        );
     }
+    if command_has_whitespace {
+        // A combined command string with no structured launch.args cannot
+        // preserve argument boundaries (an argument containing a space is
+        // indistinguishable from two arguments). Refuse rather than guess.
+        bail!(
+            "cannot safely run this bundle: launch.command contains embedded arguments but launch.args is empty:\n  \
+             command: '{}'\n  \
+             a combined command string cannot preserve argument boundaries\n  \
+             hint: re-run `pn pack` to write structured launch.command + launch.args, or edit manifest.yaml",
+            command
+        );
+    }
+
+    // Bare executable — no parsing needed.
+    Ok((command.to_string(), Vec::new()))
 }
 
 /// Check that a command is available and meets a minimum major version.
@@ -386,29 +376,38 @@ mod tests {
         );
     }
 
-    // ── resolve_launch: isolated legacy (schema 0.1) tokenization ──
+    // ── resolve_launch: combined command strings are refused, never parsed ──
 
     #[test]
-    fn legacy_clean_tokens_split_into_executable_and_args() {
-        let (command, args) = resolve_launch("pi --agent-dir agent", &[]).unwrap();
-        assert_eq!(command, "pi");
-        assert_eq!(args, vec!["--agent-dir".to_string(), "agent".to_string()]);
-    }
-
-    #[test]
-    fn legacy_quoted_argument_fails_clearly() {
-        let err = resolve_launch("pi --name \"hello world\"", &[])
+    fn embedded_args_without_structured_args_refused() {
+        // Even "clean" embedded args cannot be distinguished from an
+        // argument containing a space — refuse with a re-pack error.
+        let err = resolve_launch("pi --agent-dir agent", &[])
             .unwrap_err()
             .to_string();
         assert!(
-            err.contains("cannot safely interpret") && err.contains("re-run `pn pack`"),
-            "legacy quotes must fail clearly, got: {}",
+            err.contains("cannot safely run this bundle") && err.contains("re-run `pn pack`"),
+            "embedded args must be refused, got: {}",
             err
         );
     }
 
     #[test]
-    fn legacy_whitespace_only_command_fails_clearly() {
+    fn quoted_embedded_args_refused_too() {
+        // No shell semantics anywhere: quote characters are not interpreted,
+        // the string is still refused as ambiguous.
+        let err = resolve_launch("pi --name \"hello world\"", &[])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot safely run this bundle"),
+            "quoted embedded args must be refused, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn whitespace_only_command_fails_clearly() {
         let err = resolve_launch("   ", &[]).unwrap_err().to_string();
         assert!(err.contains("no executable"), "{}", err);
     }

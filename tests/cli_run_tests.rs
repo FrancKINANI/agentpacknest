@@ -143,16 +143,14 @@ fn valid_signed_bundle_dry_run_succeeds() {
 }
 
 #[test]
-fn legacy_embedded_args_manifest_runs_dry_run() {
-    // Schema 0.1 manifests embed arguments inside launch.command with no
-    // structured launch.args. PiHarness::prepare_runtime must reduce the
-    // command to the executable name (`pi`) and split the embedded args out
-    // — the legacy path must never try to spawn "pi --agent-dir agent" as a
-    // single binary name.
+fn embedded_args_command_refused_with_repack_error() {
+    // A manifest whose launch.command embeds arguments with no structured
+    // launch.args is ambiguous: whitespace cannot preserve argument
+    // boundaries. It must be refused with a clear re-pack error — never
+    // silently whitespace-split into a command line.
     let (_root, bundle, manifest_path) = signed_bundle("legacy-agent", "v1");
 
     let mut m = manifest::load(&manifest_path).unwrap();
-    m.schema_version = "0.1".to_string();
     m.launch.command = "pi --agent-dir agent".to_string();
     m.launch.args = vec![];
     manifest::save(&manifest_path, &m).unwrap();
@@ -162,33 +160,24 @@ fn legacy_embedded_args_manifest_runs_dry_run() {
     let out = run_pn(&bundle, &["--dry-run"]);
     let text = all_out(&out);
     assert!(
-        out.status.success(),
-        "legacy embedded-args manifest must dry-run successfully:\n{}",
-        text
-    );
-    assert!(text.contains("Checksum: ✓ verified"), "{}", text);
-    assert!(text.contains("Signature: ✓ verified"), "{}", text);
-    assert!(
-        text.contains("Command:     pi --agent-dir agent"),
-        "embedded args must be split out of the command:\n{}",
+        !out.status.success(),
+        "ambiguous embedded-args command must be refused:\n{}",
         text
     );
     assert!(
-        !text.contains("Command:     pi --agent-dir agent --agent-dir agent"),
-        "embedded args must not be duplicated:\n{}",
+        text.contains("cannot safely run this bundle") && text.contains("re-run `pn pack`"),
+        "refusal must carry a clear repack error, got:\n{}",
         text
     );
 }
 
 #[test]
-fn legacy_quoted_command_fails_clearly_not_misparsed() {
-    // A legacy command string containing quoted arguments cannot be
-    // interpreted without shell parsing — it must fail clearly at runtime
-    // preparation, never be silently whitespace-mangled.
+fn quoted_command_string_never_shell_parsed() {
+    // Even a quoted-looking command string gets no shell semantics: it is
+    // ambiguous and refused, never interpreted.
     let (_root, bundle, manifest_path) = signed_bundle("legacy-quoted-agent", "v1");
 
     let mut m = manifest::load(&manifest_path).unwrap();
-    m.schema_version = "0.1".to_string();
     m.launch.command = "pi --name \"hello world\"".to_string();
     m.launch.args = vec![];
     manifest::save(&manifest_path, &m).unwrap();
@@ -199,12 +188,36 @@ fn legacy_quoted_command_fails_clearly_not_misparsed() {
     let text = all_out(&out);
     assert!(
         !out.status.success(),
-        "uninterpretable legacy command must fail, not run:\n{}",
+        "ambiguous quoted command must fail, not run:\n{}",
         text
     );
     assert!(
-        text.contains("cannot safely interpret") || text.contains("re-run `pn pack`"),
+        text.contains("cannot safely run this bundle"),
         "failure must be a clear error, got:\n{}",
+        text
+    );
+}
+
+#[test]
+fn binary_reports_version_0_2_0() {
+    let out = Command::new(env!("CARGO_BIN_EXE_pn"))
+        .arg("--version")
+        .output()
+        .expect("failed to spawn pn binary");
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        out.status.success(),
+        "`pn --version` must succeed:\n{}",
+        text
+    );
+    assert_eq!(
+        env!("CARGO_PKG_VERSION"),
+        "0.2.0",
+        "the release crate version must be 0.2.0"
+    );
+    assert!(
+        text.contains(env!("CARGO_PKG_VERSION")),
+        "version output must report 0.2.0, got: {}",
         text
     );
 }
