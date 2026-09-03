@@ -51,10 +51,11 @@ pn run .
 |---|---|
 | `pn init` | Create a new bundle from a harness installation |
 | `pn pack` | Copy config, memory, skills, secrets into the bundle |
-| `pn run` | Launch the agent defined in the bundle |
+| `pn run` | Launch the agent defined in the bundle (warns when the bundle is stale) |
 | `pn info` | Display bundle metadata and reproducibility score |
 | `pn diff` | Compare bundle with local harness state |
 | `pn unlock` | Decrypt and inspect secrets (masked by default) |
+| `pn decrypt` | Decrypt a `.tar.gz.enc` archive back to `.tar.gz` |
 | `pn rekey` | Rotate passphrase without re-packing |
 
 ### Examples
@@ -66,12 +67,38 @@ pn init --harness pi --path ~/.pi/agent --name my-agent --output ./bundles/my-ag
 # Pack everything and create a .tar.gz archive
 pn pack --all --archive --path ~/.pi/agent
 
+# Pack, archive, and ENCRYPT the whole archive (opt-in, prompts for a passphrase)
+pn pack --all --archive --encrypt-archive --path ~/.pi/agent
+
+# Decrypt the archive on the receiving machine, then extract it
+pn decrypt my-agent.tar.gz.enc
+
 # Check bundle freshness vs. the local harness
 pn diff . --path ~/.pi/agent
 
 # Rotate the secrets passphrase
 pn rekey .
+
+# Only warn when the bundle is older than 30 days
+pn run . --max-age 30d
 ```
+
+### Bundle freshness
+
+`pn run` prints a warning (never blocks) when the bundle was packed longer
+ago than the freshness threshold — **7 days by default**. Control the
+threshold per run with `--max-age`, or globally with the
+`AGENTPACKNEST_MAX_AGE` environment variable:
+
+```bash
+pn run . --max-age 30d                    # warn only after 30 days
+AGENTPACKNEST_MAX_AGE=24h pn run .         # warn after 24 hours
+```
+
+Durations accept `7d` (days), `24h` (hours), `2w` (weeks), or a bare number
+of days (`30`). The `--max-age` flag wins over the environment variable;
+with neither set, 7 days is used. The warning is advisory — it never stops
+execution — and `pn diff` shows what changed in the local harness.
 
 ## Bundle structure
 
@@ -103,12 +130,45 @@ How the agent starts is defined **in the manifest** (`launch.command` +
 bundle. `pn run` refuses to launch unless the payload digest and the manifest
 signature verify.
 
+## Excluding files from a bundle
+
+Drop a `.agentpacknestignore` file in the **harness source directory** you
+pack from (the `--path` given to `pn pack`, e.g.
+`~/.pi/agent/.agentpacknestignore`) to keep bulky caches, logs, or other
+non-portable files out of the bundle:
+
+```gitignore
+# .agentpacknestignore — .gitignore-style, one pattern per line
+node_modules    # any file or directory named `node_modules`, at any depth
+cache
+*.log           # any file whose name ends in .log
+/tmp            # leading / anchors the match to the top of a packed component
+# comments and blank lines are ignored
+```
+
+Matching rules (a simplified `.gitignore`):
+
+- A bare name (`cache`) matches any **file or directory segment** with that
+  name at any depth.
+- `*.ext` matches any file whose name ends in `.ext`.
+- A leading `/` anchors the pattern to the top of a component's source
+  directory.
+- Patterns are matched against each file's path **within the component being
+  packed** — files that land in `agent/memory/` are matched by their name
+  there (e.g. `*.jsonl` skips old session dumps; a `sessions` pattern never
+  matches because only *contents* of the source sessions dir are copied).
+
+`pn pack` prints `Ignore: N pattern(s) from .agentpacknestignore` when the
+file is present. Secret-source files (`auth.json`, `.env`, …) can never be
+re-included by an ignore file — Core refuses to copy them as plaintext.
+
 ## Security
 
 agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the full threat model.
 
 **Highlights:**
 - Secrets encrypted with AES-256-GCM + Argon2id (documented, versioned parameters)
+- Optional **whole-archive encryption**: `pn pack --archive --encrypt-archive` wraps the entire `.tar.gz` (session memory included) in the *same* versioned AES-256-GCM + Argon2id envelope as bundle secrets — no second scheme; decrypt with `pn decrypt <file.enc>`. **Opt-in by default**: plain `.tar.gz` archives stay the default because encryption needs an interactive passphrase (breaking scripted `--archive` runs) and adds passphrase management — secrets are encrypted inside the archive either way
 - Deterministic SHA-256 payload digest covering every payload file, including `secrets/keys.enc`
 - Ed25519 signing over canonical manifest JSON; verification uses the bundled public key (portable)
 - **`pn run` refuses to launch** unless payload integrity and the manifest signature verify

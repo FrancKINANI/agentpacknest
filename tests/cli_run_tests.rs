@@ -621,6 +621,136 @@ fn allow_unverified_is_not_a_positional_bundle_argument() {
 }
 
 // ---------------------------------------------------------------------------
+// Freshness threshold (--max-age / AGENTPACKNEST_MAX_AGE)
+// ---------------------------------------------------------------------------
+
+/// Backdate the bundle's origin so it is far older than the default 7-day
+/// freshness threshold (and stays so on any real clock). Returns nothing;
+/// the manifest is re-signed in place.
+fn backdate_bundle(manifest_path: &Path, bundle: &Path) {
+    let mut m = manifest::load(manifest_path).unwrap();
+    m.origin = Some(manifest::OriginMeta {
+        origin_machine: "old-machine".to_string(),
+        packed_at: "2000-01-01T00:00:00Z".to_string(),
+        source_state_hash: None,
+    });
+    manifest::save(manifest_path, &m).unwrap();
+    let sig = signing::sign_canonical_manifest(&m).unwrap();
+    fs::write(bundle.join("manifest.sig"), &sig).unwrap();
+}
+
+fn run_pn_with_env(bundle: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pn"));
+    cmd.arg("run")
+        .arg(bundle)
+        .args(args)
+        .env("PATH", path_with_shim());
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    cmd.output().expect("failed to spawn pn binary")
+}
+
+#[test]
+fn stale_bundle_warns_by_default_and_obeys_max_age() {
+    let (_root, bundle, manifest_path) = signed_bundle("stale-agent", "v1");
+    backdate_bundle(&manifest_path, &bundle);
+
+    // Default threshold (7 days): the ~26-year-old bundle warns.
+    let out = run_pn(&bundle, &["--dry-run"]);
+    let text = all_out(&out);
+    assert!(out.status.success(), "warning must not block: {}", text);
+    assert!(
+        text.contains("WARNING: this bundle was packed"),
+        "stale bundle must warn by default: {}",
+        text
+    );
+
+    // --max-age raises the threshold past the age: no warning.
+    let out = run_pn(&bundle, &["--max-age", "999999d", "--dry-run"]);
+    let text = all_out(&out);
+    assert!(out.status.success(), "{}", text);
+    assert!(
+        !text.contains("WARNING: this bundle was packed"),
+        "--max-age must silence the warning: {}",
+        text
+    );
+
+    // AGENTPACKNEST_MAX_AGE alone also raises the threshold.
+    let out = run_pn_with_env(
+        &bundle,
+        &["--dry-run"],
+        &[("AGENTPACKNEST_MAX_AGE", "999999d")],
+    );
+    let text = all_out(&out);
+    assert!(out.status.success(), "{}", text);
+    assert!(
+        !text.contains("WARNING: this bundle was packed"),
+        "AGENTPACKNEST_MAX_AGE must silence the warning: {}",
+        text
+    );
+
+    // Precedence: the flag wins over a low env value that would warn.
+    let out = run_pn_with_env(
+        &bundle,
+        &["--max-age", "999999d", "--dry-run"],
+        &[("AGENTPACKNEST_MAX_AGE", "7d")],
+    );
+    let text = all_out(&out);
+    assert!(out.status.success(), "{}", text);
+    assert!(
+        !text.contains("WARNING: this bundle was packed"),
+        "--max-age must win over AGENTPACKNEST_MAX_AGE: {}",
+        text
+    );
+
+    // And a low env value with no flag still warns.
+    let out = run_pn_with_env(&bundle, &["--dry-run"], &[("AGENTPACKNEST_MAX_AGE", "7d")]);
+    assert!(
+        all_out(&out).contains("WARNING: this bundle was packed"),
+        "{}",
+        all_out(&out)
+    );
+}
+
+#[test]
+fn invalid_max_age_fails_cleanly() {
+    let (_root, bundle, _) = signed_bundle("bad-maxage", "v1");
+
+    let out = run_pn(&bundle, &["--max-age", "bogus", "--dry-run"]);
+    let text = all_out(&out);
+    assert!(
+        !out.status.success(),
+        "invalid --max-age must be rejected: {}",
+        text
+    );
+    assert!(
+        text.contains("invalid --max-age value") || text.contains("duration"),
+        "a clear parse error is expected: {}",
+        text
+    );
+    assert!(!text.contains("panic"), "must not panic: {}", text);
+
+    // Same for a malformed environment value.
+    let out = run_pn_with_env(
+        &bundle,
+        &["--dry-run"],
+        &[("AGENTPACKNEST_MAX_AGE", "soon")],
+    );
+    let text = all_out(&out);
+    assert!(
+        !out.status.success(),
+        "invalid AGENTPACKNEST_MAX_AGE must be rejected: {}",
+        text
+    );
+    assert!(
+        text.contains("invalid AGENTPACKNEST_MAX_AGE value") || text.contains("duration"),
+        "a clear parse error is expected: {}",
+        text
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Structural failures are clean (never panic)
 // ---------------------------------------------------------------------------
 

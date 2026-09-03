@@ -67,6 +67,8 @@ pub enum Commands {
             pn pack --with-config --with-skills --path ~/.pi/agent\n\
         \n  Pack and create a .tar.gz archive:\n    \
             pn pack --all --archive --path ~/.pi/agent\n\
+        \n  Pack, archive, and encrypt the whole archive:\n    \
+            pn pack --all --archive --encrypt-archive --path ~/.pi/agent\n\
         \n  Force overwrite existing files:\n    \
             pn pack --with-config --path ~/.pi/agent --force")]
     Pack {
@@ -110,12 +112,25 @@ pub enum Commands {
         force: bool,
     },
 
+    /// Decrypt an encrypted archive produced by `pn pack --archive --encrypt-archive`
+    #[command(after_help = "EXAMPLES:\n\
+        \n  Decrypt an encrypted archive back to .tar.gz:\n    \
+            pn decrypt my-agent.tar.gz.enc\n\
+        \n  Then extract it:\n    \
+            tar xzf my-agent.tar.gz")]
+    Decrypt {
+        /// Path to the encrypted archive (.tar.gz.enc)
+        file: String,
+    },
+
     /// Launch the agent defined in the bundle
     #[command(after_help = "EXAMPLES:\n\
         \n  Run with default settings:\n    \
             pn run .\n\
         \n  Preview without executing:\n    \
             pn run . --dry-run\n\
+        \n  Warn only when the bundle is older than 30 days:\n    \
+            pn run . --max-age 30d\n\
         \n  Run with a custom working directory:\n    \
             pn run . --workdir /tmp/agent-workspace\n\
         \n  Pass the passphrase via flag (less secure):\n    \
@@ -141,6 +156,10 @@ pub enum Commands {
         /// Allow running without integrity/sig verification (NOT RECOMMENDED)
         #[arg(long)]
         allow_unverified: bool,
+
+        /// Maximum bundle age before pn run warns — 7d, 24h, 2w, or a bare number of days (default: 7d; AGENTPACKNEST_MAX_AGE also works)
+        #[arg(long, value_name = "DURATION")]
+        max_age: Option<String>,
 
         /// Extra arguments passed to the agent command
         #[arg(trailing_var_arg = true)]
