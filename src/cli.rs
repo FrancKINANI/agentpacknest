@@ -13,10 +13,10 @@ use clap::{Parser, Subcommand};
     version,
     propagate_version = true,
     after_help = "EXAMPLES:\n\
-        \n  Initialize a bundle from a local Pi installation:\n    \
-            pn init --harness pi --path ~/.pi --name my-agent\n\
+        \n  Initialize a bundle from a local Pi installation (agent dir):\n    \
+            pn init --harness pi --path ~/.pi/agent --name my-agent\n\
         \n  Pack config, skills, and secrets into the bundle:\n    \
-            pn pack --all --path ~/.pi\n\
+            pn pack --all --path ~/.pi/agent\n\
         \n  Inspect the bundle:\n    \
             pn info .\n\
         \n  Preview what 'run' would do:\n    \
@@ -38,9 +38,9 @@ pub enum Commands {
     /// Create a new agent bundle from a harness installation
     #[command(after_help = "EXAMPLES:\n\
         \n  Init with default name in current directory:\n    \
-            pn init --path ~/.pi\n\
+            pn init --path ~/.pi/agent\n\
         \n  Init with a specific name and output directory:\n    \
-            pn init --harness pi --path ~/.pi --name my-agent --output ./bundles/my-agent")]
+            pn init --harness pi --path ~/.pi/agent --name my-agent --output ./bundles/my-agent")]
     Init {
         /// Harness to use (currently only "pi")
         #[arg(long, default_value = "pi")]
@@ -62,13 +62,13 @@ pub enum Commands {
     /// Copy files from a harness installation into the bundle
     #[command(after_help = "EXAMPLES:\n\
         \n  Pack everything (config + memory + skills + secrets):\n    \
-            pn pack --all --path ~/.pi\n\
+            pn pack --all --path ~/.pi/agent\n\
         \n  Pack only config and skills:\n    \
-            pn pack --with-config --with-skills --path ~/.pi\n\
+            pn pack --with-config --with-skills --path ~/.pi/agent\n\
         \n  Pack and create a .tar.gz archive:\n    \
-            pn pack --all --archive --path ~/.pi\n\
+            pn pack --all --archive --path ~/.pi/agent\n\
         \n  Force overwrite existing files:\n    \
-            pn pack --with-config --path ~/.pi --force")]
+            pn pack --with-config --path ~/.pi/agent --force")]
     Pack {
         /// Path to the bundle directory (default: current dir)
         bundle: Option<String>,

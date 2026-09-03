@@ -155,10 +155,6 @@ pub struct Security {
     pub secrets_encrypted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encryption: Option<String>,
-    /// Crypto format version for forward compatibility.
-    /// v1 = AES-256-GCM + Argon2id (m=64MiB, t=3, p=4, salt=16B).
-    #[serde(default = "default_crypto_format_version")]
-    pub format_version: u32,
 }
 
 fn default_crypto_format_version() -> u32 {
@@ -337,7 +333,6 @@ pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
         security: Security {
             secrets_encrypted: false,
             encryption: None,
-            format_version: 1,
         },
         integrity: Integrity {
             algorithm: "sha256".to_string(),
@@ -423,7 +418,95 @@ impl Manifest {
             );
         }
 
+        // Bundle format version — v1 is the only supported format
+        if self.bundle_version != 1 {
+            bail!(
+                "unsupported bundle format version: {} (supported: 1)\n  \
+                 hint: this bundle was created with a different bundle format",
+                self.bundle_version
+            );
+        }
+
+        // Integrity format version — v1 is the only supported digest format
+        if self.integrity.format_version != 1 {
+            bail!(
+                "unsupported integrity format version: {} (supported: 1)\n  \
+                 hint: this bundle uses an integrity scheme this pn cannot verify",
+                self.integrity.format_version
+            );
+        }
+
+        // Crypto format version — v1 is the only supported encryption format
+        if let Some(ref crypto) = self.crypto {
+            if crypto.format_version != 1 {
+                bail!(
+                    "unsupported crypto format version: {} (supported: 1)\n  \
+                     hint: this bundle encrypts secrets with a scheme this pn cannot decrypt",
+                    crypto.format_version
+                );
+            }
+        }
+
+        // Integrity digest — if present it must be a 64-char lowercase hex SHA-256
+        if let Some(ref checksum) = self.integrity.checksum {
+            if checksum.len() != 64 || !checksum.chars().all(|c| c.is_ascii_hexdigit()) {
+                bail!(
+                    "invalid integrity digest: expected 64 hex characters, got '{}'",
+                    checksum
+                );
+            }
+        }
+
+        // Bundle author
+        if self.bundle.created_by.is_empty() {
+            bail!("bundle.created_by is empty — this field is required");
+        }
+
+        // Launch args — empty arguments are meaningless and rejected
+        if self.launch.args.iter().any(|a| a.is_empty()) {
+            bail!("launch.args contains an empty argument");
+        }
+
+        // Launch working directory — must be a relative path inside the bundle
+        if let Some(ref wd) = self.launch.working_directory {
+            if wd.is_empty() {
+                bail!("launch.working_directory is empty");
+            }
+            if Path::new(wd).is_absolute() {
+                bail!(
+                    "launch.working_directory must be relative to the bundle root, got '{}'",
+                    wd
+                );
+            }
+            for component in Path::new(wd).components() {
+                if let std::path::Component::ParentDir = component {
+                    bail!(
+                        "launch.working_directory must stay inside the bundle, got '{}'",
+                        wd
+                    );
+                }
+            }
+        }
+
+        // Compatibility — minimum agentpacknest version must be a sane semver
+        if let Some(ref compat) = self.compatibility {
+            if !is_valid_version(&compat.min_agentpacknest_version) {
+                bail!(
+                    "invalid compatibility.min_agentpacknest_version: '{}'\n  \
+                     expected format: MAJOR.MINOR[.PATCH]",
+                    compat.min_agentpacknest_version
+                );
+            }
+        }
+
         Ok(())
+    }
+
+    /// The agentpacknest version that should be able to read this manifest.
+    pub fn min_agentpacknest_version(&self) -> Option<&str> {
+        self.compatibility
+            .as_ref()
+            .map(|c| c.min_agentpacknest_version.as_str())
     }
 
     /// Produce canonical JSON bytes for signing.
@@ -476,7 +559,9 @@ fn uuid_v4() -> String {
     )
 }
 
-fn now_iso8601() -> String {
+/// Current UTC time as an ISO 8601 string (no chrono dependency).
+/// Format: `2025-01-15T12:34:56Z`
+pub fn now_iso8601() -> String {
     // Simple ISO 8601 without pulling in chrono
     // Format: 2025-01-15T12:34:56Z
     let secs = std::time::SystemTime::now()
@@ -515,14 +600,25 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     (y, m, d)
 }
 
+/// Basic semantic-version validation: MAJOR.MINOR[.PATCH], numeric dotted parts.
+fn is_valid_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.is_empty() || parts.len() > 3 {
+        return false;
+    }
+    parts
+        .iter()
+        .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
 fn whoami() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
-#[allow(dead_code)]
-fn hostname() -> String {
+/// Best-effort machine name (hostname command, falling back to USER).
+pub fn hostname() -> String {
     #[cfg(unix)]
     {
         if let Ok(name) = std::process::Command::new("hostname")
@@ -597,7 +693,6 @@ mod tests {
             security: Security {
                 secrets_encrypted: false,
                 encryption: None,
-                format_version: 1,
             },
             integrity: Integrity {
                 algorithm: "sha256".to_string(),

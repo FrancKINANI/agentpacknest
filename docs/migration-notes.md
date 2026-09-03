@@ -1,7 +1,19 @@
 # Migration Notes: v0.1.x → Canonical v1.0
 
-**Status**: Phase A — Design Complete
-**Target**: v0.1.1 implementation
+**Status**: Superseded — the canonical-format items below were implemented in **v0.1.2** (see `docs/bundle-format.md`, which is the authoritative specification and is kept in sync with the implementation).
+
+This file records the original migration plan. Implemented in v0.1.2:
+- ✅ Canonical JSON signing (`Manifest::canonical_json()`, sorted keys) + bundled-public-key verification
+- ✅ Strict `pn run` verification (refuse on any integrity/signature/structural failure)
+- ✅ `--allow-unverified` with precise boundaries (trust checks only)
+- ✅ Deterministic, NUL-delimited, fail-closed payload integrity incl. `secrets/keys.enc`
+- ✅ Schema/version separation: `schema_version`, `bundle_version`, `integrity.format_version`, `crypto.format_version`
+- ✅ Pack orchestration moved into `application/pack_bundle.rs`; commands are thin wrappers
+
+Remaining for canonical v1.0 / Bundle Format v2:
+- `payload/` wrapper directory (layout-only change)
+- KEK/DEK envelope as the persisted secret format (primitives exist, unit-tested, unused)
+- Archive encryption format spec
 
 ---
 
@@ -29,11 +41,11 @@
 | Silent skip on read error | Return `Err` on any read failure |
 | No format version | Add `integrity.format_version: 1` to manifest |
 
-### Signing (`src/security/signing.rs`)
+### Signing (`src/security/signing.rs`) — DONE in v0.1.2
 
-| Current Behavior | Required Change |
+| v0.1.2 Behavior | |
 |------------------|-----------------|
-| Signs `serde_yaml::to_string(manifest)` | **Document deviation**; target: canonical JSON |
+| Signs `manifest.canonical_json()` (deterministic sorted-key JSON) | Verification recomputes canonical bytes and checks them against the bundled `signing/public.key` |
 | Loads verifying key from `~/.config/agentpacknest/` | Keep for local signing; verification uses bundled `signing/public.key` |
 | Saves signature to `manifest.sig` (bundle root) | Keep |
 | Saves public key to `signing/public.key` (bundle) | Keep (already implemented in staging) |
@@ -215,14 +227,14 @@ The staging branch already has:
 - ✅ Verification uses bundled public key
 - ✅ Structured verification sequence in `run_bundle_impl.rs`
 
-Remaining for v0.1.1:
-- [ ] Structured `launch.args` in manifest
-- [ ] Canonical JSON signing (or document YAML deviation)
-- [ ] Documented Argon2id parameters
-- [ ] Fail-closed integrity on read errors
-- [ ] `crypto.format_version`, `integrity.format_version`, `compatibility` fields
-- [ ] Application layer pack orchestration
-- [ ] Full integration test suite
+Completed in v0.1.2 (previously "Remaining for v0.1.1"):
+- [x] Structured `launch.args` in manifest
+- [x] Canonical JSON signing (canonical representation, not YAML)
+- [x] Documented Argon2id parameters
+- [x] Fail-closed integrity on read errors and symlinks
+- [x] `crypto.format_version`, `integrity.format_version`, `compatibility` fields
+- [x] Application layer pack orchestration
+- [x] Full integration test suite (lifecycle, validation matrix, CLI black-box)
 
 ---
 

@@ -4,32 +4,6 @@ use std::path::Path;
 use crate::domain::manifest;
 use crate::security::signing;
 
-/// Verify the manifest signature against the bundle's manifest.sig using the bundled public key.
-fn verify_signature_with_bundled_pubkey(
-    manifest_path: &Path,
-    sig_path: &Path,
-    pubkey_path: &Path,
-) -> Result<bool> {
-    let manifest_bytes =
-        std::fs::read(manifest_path).context("failed to read manifest for verification")?;
-    let sig_bytes = std::fs::read(sig_path).context("failed to read signature")?;
-    let pubkey_bytes = std::fs::read(pubkey_path).context("failed to read public key")?;
-
-    signing::verify(&manifest_bytes, &sig_bytes, &pubkey_bytes)
-        .context("signature verification failed")
-}
-
-/// Verify using local keypair (fallback for older bundles).
-fn verify_signature_local(manifest_path: &Path, sig_path: &Path) -> Result<bool> {
-    let manifest_bytes =
-        std::fs::read(manifest_path).context("failed to read manifest for verification")?;
-    let sig_bytes = signing::load_signature(sig_path).context("failed to load signature")?;
-    let vk = signing::load_verifying_key().context("failed to load verifying key")?;
-
-    signing::verify(&manifest_bytes, &sig_bytes, &vk.to_bytes())
-        .context("signature verification failed")
-}
-
 pub fn execute(bundle: String) -> Result<()> {
     let bundle_dir = Path::new(&bundle);
 
@@ -148,8 +122,10 @@ pub fn execute(bundle: String) -> Result<()> {
     let pubkey_path = bundle_dir.join("signing/public.key");
 
     if sig_path.is_file() && pubkey_path.is_file() {
-        // Use bundled public key for portable verification
-        match verify_signature_with_bundled_pubkey(&manifest_path, &sig_path, &pubkey_path) {
+        // Portable verification: recompute the canonical manifest
+        // representation from the parsed manifest and verify it against
+        // the bundled public key. No local keypair is involved.
+        match signing::verify_manifest_with_bundled_pubkey(&m, &sig_path, &pubkey_path) {
             Ok(true) => {
                 println!("  Status       ✓ valid signature (verified with bundled public key)")
             }
@@ -157,12 +133,7 @@ pub fn execute(bundle: String) -> Result<()> {
             Err(e) => println!("  Status       ⚠ verification failed: {}", e),
         }
     } else if sig_path.is_file() {
-        // Fallback to local keypair for older bundles
-        match verify_signature_local(&manifest_path, &sig_path) {
-            Ok(true) => println!("  Status       ✓ valid signature (verified with local keypair)"),
-            Ok(false) => println!("  Status       ✗ INVALID signature — bundle may be tampered"),
-            Err(e) => println!("  Status       ⚠ verification failed: {}", e),
-        }
+        println!("  Status       ⚠ public key missing (signing/public.key not found)");
     } else {
         println!("  Status       (unsigned — no manifest.sig found)");
     }
@@ -175,7 +146,10 @@ pub fn execute(bundle: String) -> Result<()> {
     if let Some(ref enc) = m.security.encryption {
         println!("  Encryption   {}", enc);
     }
-    println!("  Crypto fmt   v{}", m.security.format_version);
+    match m.crypto {
+        Some(ref c) => println!("  Crypto fmt   v{}", c.format_version),
+        None => println!("  Crypto fmt   (unspecified)"),
+    }
 
     // ── Launch ──────────────────────────────────────────────────────
     println!();

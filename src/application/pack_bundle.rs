@@ -75,12 +75,33 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
 
     // ── 5. Copy files ──────────────────────────────────────────────
     if request.with_config {
+        // Config source is the Pi agent root: copy loose config files only.
+        // Component directories (sessions, skills, ...) and secret sources
+        // (auth.json, .env files) are excluded — they are handled by their
+        // own pack flags and must never appear as plaintext in the payload.
         copy_dir_recursive(
             &pi.config_path(),
             &bundle_dir.join("agent/config"),
             request.force,
             "config",
             &ignore,
+            &[
+                // component directories (packed via their own flags)
+                "sessions",
+                "skills",
+                "themes",
+                "extensions",
+                "packages",
+                "prompts",
+                "npm",
+                "git",
+                "secrets",
+                // secret-source files — must only ever exist encrypted
+                "auth.json",
+                "secrets.json",
+                ".env",
+                "env",
+            ],
         )?;
     }
 
@@ -91,6 +112,7 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
             request.force,
             "memory",
             &ignore,
+            &[],
         )?;
     }
 
@@ -115,13 +137,12 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
     if request.with_secrets {
         m.security.secrets_encrypted = true;
         m.security.encryption = Some(crypto::CRYPTO_FORMAT_IDENTIFIER.to_string());
-        m.security.format_version = crypto::CRYPTO_FORMAT_VERSION;
     }
 
     // ── 7. Compute integrity checksum ──────────────────────────────
     let checksum = integrity::compute_bundle_checksum(bundle_dir)?;
     m.integrity.checksum = Some(checksum.clone());
-    m.integrity.format_version = 1;
+    m.integrity.format_version = integrity::INTEGRITY_FORMAT_VERSION;
 
     // Ensure crypto format version is set
     if m.crypto.is_none() {
@@ -141,8 +162,8 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
 
     // Set origin metadata
     m.origin = Some(manifest::OriginMeta {
-        origin_machine: hostname(),
-        packed_at: now_iso8601(),
+        origin_machine: manifest::hostname(),
+        packed_at: manifest::now_iso8601(),
         source_state_hash: None, // TODO: compute source state hash
     });
 
@@ -216,6 +237,7 @@ fn copy_dir_recursive(
     force: bool,
     label: &str,
     ignore: &IgnorePatterns,
+    excluded_names: &[&str],
 ) -> Result<()> {
     if !src.is_dir() {
         println!("  ⚠ {} not found in Pi installation, skipping", label);
@@ -247,6 +269,12 @@ fn copy_dir_recursive(
         let rel = entry.path().strip_prefix(src).unwrap();
         let rel_str = rel.to_string_lossy();
 
+        // Exclude source directories and secret files from plaintext copies
+        if is_excluded(&rel_str, excluded_names) {
+            skipped += 1;
+            continue;
+        }
+
         // Check ignore patterns
         if !ignore.is_empty() && ignore.is_ignored(&rel_str) {
             skipped += 1;
@@ -268,13 +296,40 @@ fn copy_dir_recursive(
 
     if skipped > 0 {
         println!(
-            "  ✓ {} copied ({} files, {} ignored)",
+            "  ✓ {} copied ({} files, {} excluded/ignored)",
             label, count, skipped
         );
     } else {
         println!("  ✓ {} copied ({} files)", label, count);
     }
     Ok(())
+}
+
+/// True when any path segment is in `excluded_names`, or the file is a
+/// secret-source file (`*.env`, `.env`, `env`, auth-style JSON).
+fn is_excluded(rel: &str, excluded_names: &[&str]) -> bool {
+    let segments: Vec<&str> = rel.split('/').collect();
+    let filename = segments.last().copied().unwrap_or("");
+
+    // Directory segment match (excluding the file itself is handled below)
+    if segments.len() > 1 {
+        for seg in &segments[..segments.len() - 1] {
+            if excluded_names.contains(seg) {
+                return true;
+            }
+        }
+    }
+
+    if excluded_names.contains(&filename) {
+        return true;
+    }
+
+    // .env style files, regardless of exact name
+    filename == ".env"
+        || filename == "env"
+        || filename.ends_with(".env")
+        || filename == "auth.json"
+        || filename == "secrets.json"
 }
 
 /// Copy packages (extensions, skills, themes) from Pi into bundle.
@@ -318,6 +373,11 @@ fn copy_packages(
 
                 let rel = entry.path().strip_prefix(&sub_src).unwrap();
                 let rel_str = rel.to_string_lossy();
+
+                // Secret-source files must never be copied as plaintext
+                if is_excluded(&rel_str, &["auth.json", "secrets.json", ".env", "env"]) {
+                    continue;
+                }
 
                 // Check ignore patterns
                 if !ignore.is_empty() && ignore.is_ignored(&rel_str) {
@@ -396,10 +456,13 @@ fn copy_secrets_encrypted(pi: &PiInstallation, bundle_dir: &Path, force: bool) -
     // ── Collect secrets ────────────────────────────────────────────
     let mut bundle = SecretsBundle::new();
 
-    // 1. Scan secrets/ directory for key files
+    // 1. Pi auth.json (API keys / credentials) — one secret per JSON key
+    bundle.scan_auth_json(&pi.auth_path())?;
+
+    // 2. Scan secrets/ directory for key files
     bundle.scan_secret_files(&pi.root().join("secrets"))?;
 
-    // 2. Scan .env files at root and in config/
+    // 3. Scan .env files at root and in config/
     bundle.scan_env_files(pi.root())?;
     bundle.scan_env_files(&pi.root().join("config"))?;
 
@@ -435,76 +498,6 @@ fn copy_secrets_encrypted(pi: &PiInstallation, bundle_dir: &Path, force: bool) -
     Ok(())
 }
 
-/// Create a .tar.gz archive of the bundle directory.
-/// If `encrypt` is true, the archive is encrypted with AES-256-GCM.
-#[allow(dead_code)]
-fn create_archive(bundle_dir: &Path, encrypt: bool) -> Result<()> {
-    use flate2::write::GzEncoder;
-    use flate2::Compression;
-    use tar::Builder;
-
-    let ext = if encrypt { ".tar.gz.enc" } else { ".tar.gz" };
-    let archive_name = format!(
-        "{}{}",
-        bundle_dir.file_name().unwrap_or_default().to_string_lossy(),
-        ext
-    );
-    let archive_path = bundle_dir
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(&archive_name);
-
-    println!();
-    println!("Creating archive: {}", archive_path.display());
-
-    // Build the .tar.gz in memory first
-    let mut tar_gz_buf = Vec::new();
-    {
-        let enc = GzEncoder::new(&mut tar_gz_buf, Compression::default());
-        let mut tar = Builder::new(enc);
-        tar.append_dir_all(bundle_dir.file_name().unwrap_or_default(), bundle_dir)
-            .context("failed to add files to archive")?;
-        tar.finish().context("failed to finalize archive")?;
-    }
-
-    if encrypt {
-        // Prompt for passphrase and encrypt the entire archive
-        let passphrase = crypto::prompt_passphrase_confirm()?;
-        let mut encrypted = crypto::encrypt_secrets(&passphrase, &tar_gz_buf)
-            .context("failed to encrypt archive")?;
-        fs::write(&archive_path, &encrypted).with_context(|| {
-            format!(
-                "failed to write encrypted archive: {}",
-                archive_path.display()
-            )
-        })?;
-        zeroize_buffer(&mut tar_gz_buf);
-        zeroize_buffer(&mut encrypted);
-    } else {
-        fs::write(&archive_path, &tar_gz_buf)
-            .with_context(|| format!("failed to write archive: {}", archive_path.display()))?;
-    }
-
-    let size = fs::metadata(&archive_path)
-        .map(|m| m.len() as f64 / 1024.0)
-        .unwrap_or(0.0);
-    println!(
-        "  ✓ archive created ({:.1} KB){}",
-        size,
-        if encrypt { " (encrypted)" } else { "" }
-    );
-
-    Ok(())
-}
-
-/// Zeroize a buffer to prevent secrets from lingering in memory.
-#[allow(dead_code)]
-fn zeroize_buffer(buf: &mut Vec<u8>) {
-    use zeroize::Zeroize;
-    buf.zeroize();
-    buf.clear();
-}
-
 fn flag(v: bool) -> &'static str {
     if v {
         "yes"
@@ -513,57 +506,169 @@ fn flag(v: bool) -> &'static str {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers (duplicated from manifest.rs for now)
-// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
 
-fn hostname() -> String {
-    #[cfg(unix)]
-    {
-        if let Ok(name) = std::process::Command::new("hostname")
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        {
-            if !name.is_empty() {
-                return name;
-            }
+    /// Ensure a signing keypair exists (create it on first use).
+    fn ensure_keypair() {
+        if signing::load_verifying_key().is_err() {
+            // Ignore "already exists" races between parallel tests.
+            let _ = signing::generate_keypair();
         }
     }
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "unknown".to_string())
-}
 
-fn now_iso8601() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    /// Build a fake Pi agent directory.
+    fn fake_pi(dir: &Path) {
+        fs::create_dir_all(dir.join("sessions")).unwrap();
+        fs::create_dir_all(dir.join("packages/skills/coding")).unwrap();
+        fs::create_dir_all(dir.join("extensions")).unwrap();
+        fs::write(dir.join("settings.json"), "{\"version\": \"0.5.0\"}").unwrap();
+        fs::write(
+            dir.join("auth.json"),
+            "{\"anthropicApiKey\": \"sk-super-secret-value\"}",
+        )
+        .unwrap();
+        fs::write(dir.join("sessions/2025-01-15.jsonl"), "{}").unwrap();
+        fs::write(
+            dir.join("packages/skills/coding/prompt.md"),
+            "# coding skill",
+        )
+        .unwrap();
+    }
 
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
+    /// Initialize an empty bundle directory with a default manifest.
+    fn init_bundle(dir: &Path, name: &str) {
+        let m = manifest::default_pi(name, "0.5.0");
+        let manifest_path = dir.join("manifest.yaml");
+        manifest::save(&manifest_path, &m).unwrap();
+    }
 
-    let (year, month, day) = days_to_ymd(days);
+    fn run_pack(bundle: &Path, pi: &Path, flags: Vec<(&str, bool)>) -> PackBundleResult {
+        ensure_keypair();
+        let request = PackBundleRequest {
+            bundle_path: bundle.to_path_buf(),
+            harness_path: Some(pi.to_path_buf()),
+            with_config: flags.iter().any(|(f, _)| *f == "config"),
+            with_memory: flags.iter().any(|(f, _)| *f == "memory"),
+            with_skills: flags.iter().any(|(f, _)| *f == "skills"),
+            with_secrets: flags.iter().any(|(f, _)| *f == "secrets"),
+            force: true,
+        };
+        execute(request).unwrap()
+    }
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        year, month, day, hours, minutes, seconds
-    )
-}
+    fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        for entry in walkdir::WalkDir::new(dir) {
+            let entry = entry.unwrap();
+            if entry.file_type().is_file() {
+                out.push(entry.path().to_path_buf());
+            }
+        }
+        out
+    }
 
-fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    let z = days + 719468;
-    let era = z / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
+    #[test]
+    fn pack_config_excludes_secret_sources() {
+        let pi_dir = TempDir::new().unwrap();
+        fake_pi(pi_dir.path());
+        let bundle_dir = TempDir::new().unwrap();
+        init_bundle(bundle_dir.path(), "cfg-agent");
+
+        run_pack(bundle_dir.path(), pi_dir.path(), vec![("config", true)]);
+
+        // Loose config file copied
+        assert!(bundle_dir
+            .path()
+            .join("agent/config/settings.json")
+            .is_file());
+
+        // Secret sources must NOT exist anywhere in the bundle as plaintext
+        for f in files_under(bundle_dir.path()) {
+            let name = f.file_name().unwrap().to_string_lossy().into_owned();
+            assert_ne!(
+                name,
+                "auth.json",
+                "auth.json leaked into bundle: {}",
+                f.display()
+            );
+            assert!(
+                !name.ends_with(".env"),
+                "env file leaked into bundle: {}",
+                f.display()
+            );
+        }
+
+        // Component directories are not nested inside config/
+        assert!(!bundle_dir.path().join("agent/config/sessions").exists());
+        assert!(!bundle_dir.path().join("agent/config/packages").exists());
+
+        // And the secret VALUE never appears in any packed file
+        let contents: String = files_under(bundle_dir.path())
+            .iter()
+            .map(|f| fs::read_to_string(f).unwrap_or_default())
+            .collect();
+        assert!(
+            !contents.contains("sk-super-secret-value"),
+            "plaintext secret value leaked into bundle payload"
+        );
+    }
+
+    #[test]
+    fn pack_with_skills_copies_packages_only() {
+        let pi_dir = TempDir::new().unwrap();
+        fake_pi(pi_dir.path());
+        let bundle_dir = TempDir::new().unwrap();
+        init_bundle(bundle_dir.path(), "skill-agent");
+
+        run_pack(bundle_dir.path(), pi_dir.path(), vec![("skills", true)]);
+
+        assert!(bundle_dir
+            .path()
+            .join("agent/packages/skills/coding/prompt.md")
+            .is_file());
+        assert!(!bundle_dir.path().join("agent/config").exists());
+        assert!(!bundle_dir.path().join("agent/packages/auth.json").exists());
+    }
+
+    #[test]
+    fn pack_sets_formats_and_signs_valid_bundle() {
+        let pi_dir = TempDir::new().unwrap();
+        fake_pi(pi_dir.path());
+        let bundle_dir = TempDir::new().unwrap();
+        init_bundle(bundle_dir.path(), "sign-agent");
+
+        let result = run_pack(
+            bundle_dir.path(),
+            pi_dir.path(),
+            vec![("config", true), ("skills", true)],
+        );
+
+        // Format versions are recorded in the manifest
+        assert_eq!(result.manifest.integrity.format_version, 1);
+        assert_eq!(
+            result.manifest.crypto.as_ref().unwrap().format_version,
+            crypto::CRYPTO_FORMAT_VERSION
+        );
+        assert_eq!(
+            result.manifest.integrity.checksum.as_deref(),
+            Some(result.checksum.as_str())
+        );
+
+        // Integrity verifies
+        assert!(integrity::verify_checksum(bundle_dir.path(), &result.checksum).unwrap());
+
+        // Signature verifies with the bundled public key (portable)
+        let sig_path = bundle_dir.path().join("manifest.sig");
+        let pubkey_path = bundle_dir.path().join("signing/public.key");
+        assert!(sig_path.is_file());
+        assert!(pubkey_path.is_file());
+        let manifest = manifest::load(&bundle_dir.path().join("manifest.yaml")).unwrap();
+        let verified =
+            signing::verify_manifest_with_bundled_pubkey(&manifest, &sig_path, &pubkey_path)
+                .unwrap();
+        assert!(verified);
+    }
 }

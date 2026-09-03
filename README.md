@@ -33,10 +33,10 @@ Requires Rust ≥ 1.75. Manage with [mise](https://mise.jdx.dev) or [rustup](htt
 
 ```bash
 # 1. Capture your Pi environment
-pn init --harness pi --path ~/.pi --name my-agent
+pn init --harness pi --path ~/.pi/agent --name my-agent
 
 # 2. Pack config, skills, and secrets
-pn pack --all --path ~/.pi
+pn pack --all --path ~/.pi/agent
 
 # 3. Inspect the bundle
 pn info .
@@ -64,7 +64,7 @@ pn run .
 pn init --harness aider --name research-agent
 
 # Pack everything and create encrypted archive
-pn pack --all --archive --encrypt-archive --path ~/.pi
+pn pack --all --archive --encrypt-archive --path ~/.pi/agent
 
 # Check bundle freshness
 pn diff . --path ~/.pi/agent
@@ -77,9 +77,11 @@ pn rekey .
 
 ```
 my-agent/
-├── manifest.yaml          # Metadata, integrity, platform info
-├── manifest.sig           # Ed25519 signature (tamper-evident)
-├── agent/
+├── manifest.yaml          # Metadata + payload integrity digest
+├── manifest.sig           # Ed25519 signature over canonical manifest JSON
+├── signing/
+│   └── public.key         # Public verification key (travels with the bundle)
+├── agent/                 # PAYLOAD — everything the digest covers
 │   ├── config/            # Agent configuration files
 │   ├── memory/            # Session history and state
 │   └── packages/
@@ -87,21 +89,30 @@ my-agent/
 │       ├── skills/        # Agent skills
 │       └── themes/        # UI themes
 ├── secrets/
-│   └── keys.enc           # Encrypted secrets (AES-256-GCM)
+│   └── keys.enc           # Encrypted secrets (AES-256-GCM + Argon2id)
 └── launch                 # Launch script (placeholder)
 ```
+
+The **payload** (`agent/` + `secrets/keys.enc`) is hashed with a deterministic
+SHA-256 digest stored in `manifest.yaml`; the manifest is signed with Ed25519
+over a canonical JSON representation. Verification is **portable**: `pn run`
+and `pn info` verify against the public key bundled in `signing/public.key` —
+no local keypair is needed to verify a bundle.
 
 ## Security
 
 agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the full threat model.
 
 **Highlights:**
-- Secrets encrypted with AES-256-GCM + Argon2 key derivation
-- Ed25519 bundle signing (tamper-evident)
-- KEK/DEK envelope for passphrase rotation without re-packing
+- Secrets encrypted with AES-256-GCM + Argon2id (documented, versioned parameters)
+- Deterministic SHA-256 payload digest covering every payload file, including `secrets/keys.enc`
+- Ed25519 signing over canonical manifest JSON; verification uses the bundled public key (portable)
+- **`pn run` refuses to launch** unless payload integrity and the manifest signature verify
+- `pn run --allow-unverified` bypasses trust checks only — never structural/format validation
 - `env_clear()` prevents leaking host environment to agents
 - Zeroization of sensitive buffers after use
 - Restrictive file permissions (0600) on secrets
+- Passphrase rotation (`pn rekey`) is atomic — a failure never destroys the existing secrets
 
 ## Reproducibility
 
@@ -125,15 +136,16 @@ agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the f
 
 | Harness | Status | Notes |
 |---|---|---|
-| [Pi](https://pi.dev) | ✅ Full support | Detection, config, skills, memory, secrets |
+| [Pi](https://pi.dev) | ✅ Full support | Detection, config, skills, memory, secrets (`auth.json`, `.env`, `secrets/`) |
 | [Aider](https://aider.chat) | 🔨 Skeleton | Detection planned, pack not yet implemented |
 | Claude Code | 📋 Planned | — |
 | Codex | 📋 Planned | — |
 
 ## Roadmap
 
-- **v0.1** — Pi harness rock-solid (current)
-- **v0.2** — Harness trait abstraction
+- **v0.1** — Pi harness rock-solid (released)
+- **v0.1.2** — Format, integrity & trust foundation (current): canonical bundle format, deterministic payload integrity, portable signature verification, strict `pn run` enforcement, schema failure matrix
+- **v0.2** — Multi-harness platform work
 - **v0.3** — Second harness (Aider or Claude Code)
 - **v0.4** — MCP config + dependency management
 - **v0.5** — Trust chain + publish/pull

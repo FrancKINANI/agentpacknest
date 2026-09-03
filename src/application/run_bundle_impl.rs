@@ -12,6 +12,7 @@ use crate::domain::manifest;
 use crate::security::crypto;
 use crate::security::integrity;
 use crate::security::secrets::SecretsBundle;
+use crate::security::signing;
 
 /// Use case: run an agent from a bundle.
 pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
@@ -43,17 +44,24 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
     check_stale_bundle(&m)?;
 
     // ── 4. Verify integrity and signature BEFORE execution ──────────
-    // This is a security checkpoint: tampered bundles must not execute by default
+    // This is a security checkpoint: tampered bundles must not execute by default.
+    // `--allow-unverified` bypasses ONLY trust verification (checksum/signature),
+    // never structural validity — the manifest was already parsed and validated
+    // above, and schema/format failures abort before this point.
     verify_bundle_integrity_and_signature(&bundle_dir, &m, request.allow_unverified)?;
 
     println!();
 
-    // ── 5. Check runtime requirements ──────────────────────────────
+    // ── 5. Validate runtime compatibility ───────────────────────────
+    // The manifest may require a minimum agentpacknest version to read it.
+    check_compatibility(&m)?;
+
+    // ── 6. Check runtime requirements ──────────────────────────────
     if m.harness.name == "pi" {
         check_node_version(20)?;
     }
 
-    // ── 6. Decrypt secrets (in memory only) ────────────────────────
+    // ── 7. Decrypt secrets (in memory only) ────────────────────────
     let secrets = if m.security.secrets_encrypted {
         let enc_path = bundle_dir.join("secrets/keys.enc");
         if !enc_path.is_file() {
@@ -77,10 +85,16 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
         None
     };
 
-    // ── 7. Prepare working directory ───────────────────────────────
+    // ── 8. Prepare working directory ───────────────────────────────
     let run_workdir = match request.workdir {
         Some(w) => PathBuf::from(w),
-        None => bundle_dir.join(m.launch.working_directory.as_deref().unwrap_or(".")),
+        None => {
+            let wd = bundle_dir.join(m.launch.working_directory.as_deref().unwrap_or("."));
+            // A manifest-provided working directory must stay inside the bundle.
+            // This is a structural check: `--allow-unverified` cannot override it.
+            ensure_inside_bundle(&bundle_dir, &wd)?;
+            wd
+        }
     };
 
     if !run_workdir.is_dir() {
@@ -90,10 +104,10 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
         );
     }
 
-    // ── 8. Build environment ───────────────────────────────────────
+    // ── 9. Build environment ───────────────────────────────────────
     let env_vars = build_env(&bundle_dir, &m, secrets.as_ref());
 
-    // ── 9. Resolve command ─────────────────────────────────────────
+    // ── 10. Resolve command ────────────────────────────────────────
     // Use structured launch.args (v0.1.1+) with fallback to legacy split_whitespace
     let cmd_name = &m.launch.command;
     let mut cmd_args: Vec<&str> = if !m.launch.args.is_empty() {
@@ -104,7 +118,7 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
     };
     cmd_args.extend(request.args.iter().map(|s| s.as_str()));
 
-    // ── 10. Dry run or execute ─────────────────────────────────────
+    // ── 11. Dry run or execute ─────────────────────────────────────
     println!();
     println!("Working dir: {}", run_workdir.display());
     println!("Command:     {} {}", cmd_name, cmd_args.join(" "));
@@ -132,7 +146,7 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
     // Run the command with our env vars injected
     let exit_code = run_command(cmd_name, &cmd_args, &run_workdir, &env_vars)?;
 
-    // ── 11. Cleanup ────────────────────────────────────────────────
+    // ── 12. Cleanup ────────────────────────────────────────────────
     // Secrets only existed in memory — they're dropped here.
     // env_vars is dropped too.
     // No cleanup needed since we never wrote secrets to disk.
@@ -164,8 +178,6 @@ fn verify_bundle_integrity_and_signature(
     m: &manifest::Manifest,
     allow_unverified: bool,
 ) -> Result<()> {
-    let manifest_path = bundle_dir.join("manifest.yaml");
-
     // ── Check checksum ───────────────────────────────────────────────
     if let Some(ref expected) = m.integrity.checksum {
         match integrity::verify_checksum(bundle_dir, expected) {
@@ -215,15 +227,17 @@ fn verify_bundle_integrity_and_signature(
     let pubkey_path = bundle_dir.join("signing/public.key");
 
     if sig_path.is_file() && pubkey_path.is_file() {
+        // Verify over the canonical manifest representation (recomputed from
+        // the parsed manifest) using the public key bundled with the bundle.
         let signature_verified =
-            verify_manifest_signature_with_pubkey(&manifest_path, &sig_path, &pubkey_path);
+            signing::verify_manifest_with_bundled_pubkey(m, &sig_path, &pubkey_path);
 
         match signature_verified {
             Ok(true) => println!("Signature: ✓ verified"),
             Ok(false) => {
                 if allow_unverified {
                     eprintln!(
-                        "⚠ WARNING: --allow-unverified specified — signature verification skipped"
+                        "⚠ WARNING: --allow-unverified specified — signature verification failed"
                     );
                     eprintln!("  the bundle may have been tampered with");
                     eprintln!("  do not run bundles from untrusted sources");
@@ -270,46 +284,67 @@ fn verify_bundle_integrity_and_signature(
     Ok(())
 }
 
-/// Verify manifest signature using the bundled public key.
-fn verify_manifest_signature_with_pubkey(
-    manifest_path: &Path,
-    sig_path: &Path,
-    pubkey_path: &Path,
-) -> Result<bool> {
-    let manifest_bytes =
-        fs::read(manifest_path).context("failed to read manifest for verification")?;
-    let sig_bytes = fs::read(sig_path).context("failed to read signature")?;
-    let pubkey_bytes = fs::read(pubkey_path).context("failed to read public key")?;
+/// Ensure a manifest-derived path stays inside the bundle directory.
+///
+/// This is a structural safety check (path traversal), NOT a trust check:
+/// `--allow-unverified` must never allow a manifest to redirect execution
+/// outside the bundle. Uses canonicalized paths so `..` and symlinks resolve.
+fn ensure_inside_bundle(bundle_dir: &Path, candidate: &Path) -> Result<()> {
+    let root = fs::canonicalize(bundle_dir)
+        .with_context(|| format!("failed to resolve bundle path: {}", bundle_dir.display()))?;
+    let resolved = fs::canonicalize(candidate).with_context(|| {
+        format!(
+            "failed to resolve working directory: {}",
+            candidate.display()
+        )
+    })?;
 
-    // Verify the signature against the manifest bytes using the public key
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-    if pubkey_bytes.len() != 32 {
+    if !resolved.starts_with(&root) {
         bail!(
-            "invalid public key: expected 32 bytes, got {}",
-            pubkey_bytes.len()
+            "launch.working_directory escapes the bundle: {} (resolved to {})",
+            candidate.display(),
+            resolved.display()
         );
     }
-    if sig_bytes.len() != 64 {
+    Ok(())
+}
+
+/// Enforce `compatibility.min_agentpacknest_version` from the manifest.
+///
+/// Refuses to run when the bundle requires a newer agentpacknest than the
+/// running binary. Structural — `--allow-unverified` cannot override it.
+fn check_compatibility(m: &manifest::Manifest) -> Result<()> {
+    let Some(required) = m.min_agentpacknest_version() else {
+        return Ok(());
+    };
+
+    let current = env!("CARGO_PKG_VERSION");
+    if version_lt(current, required) {
         bail!(
-            "invalid signature: expected 64 bytes, got {}",
-            sig_bytes.len()
+            "this bundle requires agentpacknest >= {required}, but you are running {current}\n\
+             hint: upgrade pn to read this bundle",
         );
     }
+    Ok(())
+}
 
-    let mut key_bytes = [0u8; 32];
-    key_bytes.copy_from_slice(&pubkey_bytes);
-    let public_key = VerifyingKey::from_bytes(&key_bytes)
-        .map_err(|e| anyhow::anyhow!("invalid public key: {}", e))?;
-
-    let mut sig_bytes_arr = [0u8; 64];
-    sig_bytes_arr.copy_from_slice(&sig_bytes);
-    let signature = Signature::from_bytes(&sig_bytes_arr);
-
-    match public_key.verify(&manifest_bytes, &signature) {
-        Ok(()) => Ok(true),
-        Err(_) => Ok(false),
+/// True when `a` < `b` for dotted numeric versions (MAJOR.MINOR[.PATCH]).
+fn version_lt(a: &str, b: &str) -> bool {
+    fn parts(v: &str) -> Vec<u64> {
+        v.split('.')
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect()
     }
+    let pa = parts(a);
+    let pb = parts(b);
+    for i in 0..pa.len().max(pb.len()) {
+        let va = pa.get(i).copied().unwrap_or(0);
+        let vb = pb.get(i).copied().unwrap_or(0);
+        if va != vb {
+            return va < vb;
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------

@@ -113,16 +113,19 @@ impl SecretsBundle {
         lines
     }
 
-    /// Change the passphrase without re-encrypting the underlying data.
+    /// Rotate the passphrase protecting an encrypted secrets file.
     ///
-    /// Uses KEK/DEK envelope: decrypt DEK with old passphrase,
-    /// re-encrypt DEK with new passphrase. Data is never touched.
+    /// The file is decrypted with the old passphrase and re-encrypted with
+    /// the new one. The write is **atomic**: the new ciphertext goes to a
+    /// temporary file in the same directory and is renamed over the original,
+    /// so a failure part-way through can never destroy the only decryptable
+    /// copy.
     pub fn rekey(path: &Path, old_passphrase: &str, new_passphrase: &str) -> Result<()> {
         if new_passphrase.is_empty() {
             bail!("new passphrase cannot be empty");
         }
 
-        // Read and decrypt existing bundle
+        // Read and decrypt existing bundle (fails before any write happens)
         let encrypted = fs::read(path)
             .with_context(|| format!("failed to read encrypted file: {}", path.display()))?;
         let plaintext = crypto::decrypt_secrets(old_passphrase, &encrypted)
@@ -131,16 +134,42 @@ impl SecretsBundle {
         // Re-encrypt with new passphrase
         let new_encrypted = crypto::encrypt_secrets(new_passphrase, &plaintext)
             .context("failed to encrypt with new passphrase")?;
+        // Zeroize plaintext now that it has been re-encrypted
+        let mut plaintext = plaintext;
+        plaintext.zeroize();
 
-        fs::write(path, &new_encrypted)
-            .with_context(|| format!("failed to write re-encrypted file: {}", path.display()))?;
+        // Atomic replace: write temp file in same dir, then rename over target
+        let parent = path
+            .parent()
+            .with_context(|| format!("no parent directory for: {}", path.display()))?;
+        fs::create_dir_all(parent)?;
 
-        // Set restrictive permissions
+        let tmp = parent.join(format!(
+            ".{}.rekey.tmp",
+            path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "keys".to_string())
+        ));
+
+        fs::write(&tmp, &new_encrypted).with_context(|| {
+            format!(
+                "failed to write temporary re-encrypted file: {}",
+                tmp.display()
+            )
+        })?;
+
+        // Set restrictive permissions before moving into place
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
         }
+
+        fs::rename(&tmp, path)
+            .with_context(|| format!("failed to replace encrypted file: {}", path.display()))?;
+
+        // Clean up the temp file if rename somehow left it behind
+        let _ = fs::remove_file(&tmp);
 
         Ok(())
     }
@@ -248,6 +277,33 @@ impl SecretsBundle {
                 let value = fs::read_to_string(&path)
                     .with_context(|| format!("failed to read: {}", path.display()))?;
                 self.insert(key, value);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Scan a Pi-style `auth.json` credentials file.
+    ///
+    /// Each top-level string key/value becomes one secret. Nested objects,
+    /// arrays, numbers and booleans are skipped (only plain key/value
+    /// credentials are portable), and keys that are not valid environment
+    /// variable names are ignored.
+    pub fn scan_auth_json(&mut self, path: &Path) -> Result<()> {
+        if !path.is_file() {
+            return Ok(());
+        }
+
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("failed to read auth file: {}", path.display()))?;
+        let json: serde_json::Value = serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse auth file: {}", path.display()))?;
+
+        if let serde_json::Value::Object(map) = json {
+            for (key, value) in map {
+                if let serde_json::Value::String(s) = value {
+                    self.insert(key, s);
+                }
             }
         }
 
@@ -524,5 +580,112 @@ mod tests {
         b.insert("123BAD", "bad");
         assert_eq!(b.len(), 1);
         assert_eq!(b.get("VALID_KEY"), Some("ok"));
+    }
+
+    // ── auth.json scanning ────────────────────────────────────────────
+
+    #[test]
+    fn scan_auth_json_flat_keys() {
+        let dir = TempDir::new().unwrap();
+        let auth = dir.path().join("auth.json");
+        fs::write(
+            &auth,
+            r#"{"anthropicApiKey": "sk-ant-123", "openAiKey": "sk-openai-456"}"#,
+        )
+        .unwrap();
+
+        let mut b = SecretsBundle::new();
+        b.scan_auth_json(&auth).unwrap();
+        assert_eq!(b.len(), 2);
+        assert_eq!(b.get("anthropicApiKey"), Some("sk-ant-123"));
+        assert_eq!(b.get("openAiKey"), Some("sk-openai-456"));
+    }
+
+    #[test]
+    fn scan_auth_json_skips_non_strings_and_bad_keys() {
+        let dir = TempDir::new().unwrap();
+        let auth = dir.path().join("auth.json");
+        fs::write(
+            &auth,
+            r#"{"goodKey": "value", "nested": {"x": "y"}, "num": 5, "arr": ["a"], "has-dash": "z"}"#,
+        )
+        .unwrap();
+
+        let mut b = SecretsBundle::new();
+        b.scan_auth_json(&auth).unwrap();
+        assert_eq!(b.len(), 1);
+        assert_eq!(b.get("goodKey"), Some("value"));
+    }
+
+    #[test]
+    fn scan_auth_json_missing_file_is_noop() {
+        let mut b = SecretsBundle::new();
+        b.scan_auth_json(Path::new("/nonexistent/auth.json"))
+            .unwrap();
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn scan_auth_json_malformed_file_errors() {
+        let dir = TempDir::new().unwrap();
+        let auth = dir.path().join("auth.json");
+        fs::write(&auth, "{{{{not json").unwrap();
+        let mut b = SecretsBundle::new();
+        assert!(b.scan_auth_json(&auth).is_err());
+    }
+
+    // ── rekey ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn rekey_rotates_passphrase() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("keys.enc");
+        let original = sample_bundle();
+        original.save_encrypted(&path, "old-pass").unwrap();
+
+        // Old passphrase works before rekey
+        assert!(SecretsBundle::load_decrypted(&path, "old-pass").is_ok());
+
+        SecretsBundle::rekey(&path, "old-pass", "new-pass").unwrap();
+
+        // Old fails, new succeeds, values identical
+        assert!(SecretsBundle::load_decrypted(&path, "old-pass").is_err());
+        let loaded = SecretsBundle::load_decrypted(&path, "new-pass").unwrap();
+        assert_eq!(loaded, original);
+    }
+
+    #[test]
+    fn rekey_wrong_old_passphrase_leaves_file_intact() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("keys.enc");
+        let original = sample_bundle();
+        original.save_encrypted(&path, "old-pass").unwrap();
+        let before = fs::read(&path).unwrap();
+
+        let result = SecretsBundle::rekey(&path, "wrong-pass", "new-pass");
+        assert!(result.is_err());
+
+        // Original ciphertext untouched — still decryptable with old pass
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(
+            SecretsBundle::load_decrypted(&path, "old-pass").unwrap(),
+            original
+        );
+        // No leftover temp files
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".rekey.tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn rekey_rejects_empty_new_passphrase() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("keys.enc");
+        sample_bundle().save_encrypted(&path, "old-pass").unwrap();
+        assert!(SecretsBundle::rekey(&path, "old-pass", "").is_err());
     }
 }

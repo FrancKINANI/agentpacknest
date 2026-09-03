@@ -2,7 +2,7 @@
 
 **Version**: 1.0 (Bundle Format v1)
 **Manifest Schema**: 0.2
-**AgentPackNest Application**: 0.1.x
+**AgentPackNest Application**: 0.1.2
 
 ---
 
@@ -100,7 +100,7 @@ The current implementation (v0.1.x) uses a slightly different layout at the bund
 schema_version: "0.2"
 
 # REQUIRED: AgentPackNest version that created this manifest
-agentpacknest_version: "0.1.1"
+agentpacknest_version: "0.1.2"
 
 # REQUIRED: Bundle format version (increments on structural changes)
 bundle_version: 1
@@ -206,7 +206,7 @@ The following version concepts are **independent** and must not be conflated:
 
 | Concept | Field | Current Value | Purpose |
 |---------|-------|---------------|---------|
-| AgentPackNest Application | `agentpacknest_version` | "0.1.1" | Version of the `pn` binary |
+| AgentPackNest Application | `agentpacknest_version` | "0.1.2" | Version of the `pn` binary |
 | Bundle Format | `bundle_version` | 1 | Structural layout of bundle directory |
 | Manifest Schema | `schema_version` | "0.2" | YAML schema of manifest.yaml |
 | Integrity Format | `integrity.format_version` | 1 | How payload checksum is computed |
@@ -273,9 +273,9 @@ payload_digest = SHA-256(
 
 **Principle**: Integrity verification fails closed. Any inability to hash the complete declared payload is a verification failure.
 
-### Current Implementation Note (v0.1.x)
+### v0.1.2 Implementation Note
 
-The current code computes checksum over `agent/` and `secrets/` at bundle root (no `payload/` wrapper). This is equivalent to the conceptual model. The `payload/` wrapper will be introduced in Bundle Format v2.
+The code computes the checksum over `agent/` and `secrets/` at the bundle root (no `payload/` wrapper) — the v0.1.x payload boundary. Paths are canonicalized to forward slashes, files are sorted by canonical path, each file contributes `canonical_path ‖ NUL ‖ contents`, and any traversal/symlink/read error fails the computation. The `payload/` wrapper will be introduced in Bundle Format v2 with an identical scope.
 
 ---
 
@@ -298,7 +298,7 @@ canonical_bytes = serialize_to_json(manifest, options={
 
 **Rationale**: YAML serialization is not guaranteed stable across libraries/versions. JSON with sorted keys is deterministic and cross-platform.
 
-**Current Implementation Note (v0.1.x)**: The current code signs `serde_yaml::to_string(&manifest)` output. This is a known deviation. Migration to canonical JSON is planned for v0.2. For v0.1.1, we document the current behavior and ensure it is deterministic within the same library version.
+**Implemented in v0.1.2**: signing uses the canonical JSON representation described above. `Manifest::canonical_json()` serializes to JSON with recursively sorted object keys, which is deterministic across machines and serde versions. Verification (`pn run`, `pn info`) recomputes the canonical bytes from the parsed manifest and verifies them against the **bundled** public key (`signing/public.key`) — the verifier never needs the signer's private key.
 
 ### Signature Algorithm
 
@@ -308,8 +308,8 @@ canonical_bytes = serialize_to_json(manifest, options={
 | Input | Canonical manifest bytes (as defined above) |
 | Output | 64-byte signature (R || S) |
 | Public key | 32-byte raw Ed25519 verifying key |
-| Public key location | `signing/public.key` (in bundle) |
-| Private key location | `~/.config/agentpacknest/signing.key` (NEVER in bundle) |
+| Public key location | `signing/public.key` (in bundle, portable) |
+| Private key location | `~/.config/agentpacknest/keypair` (NEVER in bundle) |
 
 ### Verification Process
 
@@ -455,7 +455,7 @@ pn run <bundle>
 | Included in integrity metadata as plaintext | Protected by KEK/DEK envelope |
 | Written to temporary files | In-memory only during run |
 
-### KEK/DEK Envelope
+### Secret Blob Format (v0.1.2)
 
 ```
 Passphrase
@@ -464,18 +464,25 @@ Passphrase
 Argon2id(m=64MiB, t=3, p=4, salt=16B)
     │
     ▼
-KEK (Key Encryption Key)
-    │
-    ├──▶ Encrypts DEK (Data Encryption Key, 32B random)
+AES key (32B)
     │
     ▼
-DEK ──▶ AES-256-GCM encrypts secrets JSON
+AES-256-GCM encrypts the secrets JSON
     │
     ▼
-Stored: salt || nonce || encrypted_DEK || encrypted_secrets || tag
+Stored: salt(16B) || nonce(12B) || ciphertext + GCM tag
 ```
 
-**Format version**: `aes-256-gcm/argon2id/v1` (stored in `security.encryption`)
+- `crypto.format_version: 1` identifies this scheme; parameters MUST NOT
+  change without incrementing it.
+- `security.encryption: "aes-256-gcm/argon2id/v1"` (informational string).
+- `pn rekey` rotates the passphrase by decrypting with the old passphrase and
+  re-encrypting with the new one. The write is atomic (temp file + rename),
+  so a wrong old passphrase or a crash mid-write never destroys the only
+  decryptable copy.
+- KEK/DEK envelope primitives exist in the codebase (unit-tested) but are not
+  used for the v1 secret blob; they are reserved for a future format version
+  that enables rotation without touching the ciphertext.
 
 ---
 
@@ -559,35 +566,41 @@ Command::new(&manifest.launch.command)
 
 ## 11. Migration Notes (v0.1.x → Canonical v1.0)
 
-### Current v0.1.x Deviations
+### v0.1.2 Implementation Status
 
-| Area | Current | Canonical | Migration |
-|------|---------|-----------|-----------|
-| Bundle layout | `agent/`, `secrets/` at root | `payload/agent/`, `payload/secrets/` | Add `payload/` wrapper in v2 |
-| Manifest signing | YAML bytes (serde_yaml) | Canonical JSON (sorted keys) | Change in v0.2; document current |
-| Integrity scope | `agent/` + `secrets/` (root) | `payload/agent/` + `payload/secrets/` | Equivalent, wrapper only |
-| Launch format | `command: "pi --agent-dir agent"` (string) | Structured `command + args` | Refactor in v0.1.1 |
-| Crypto format | Undocumented Argon2 defaults | Documented `argon2id/m=64MiB/t=3/p=4` | Document + test in v0.1.1 |
-| Version fields | Mixed/implicit | Separated (§4) | Add fields in v0.1.1 |
+| Area | v0.1.2 state | Remaining for v1.0 |
+|------|--------------|--------------------|
+| Bundle layout | `agent/`, `secrets/` at bundle root, treated as the payload boundary | Add `payload/` wrapper (cosmetic — conceptual model identical) |
+| Manifest signing | Canonical JSON (recursively sorted keys), verified with bundled public key | — |
+| Integrity scope | `agent/` + `secrets/` (incl. `keys.enc`); deterministic, NUL-delimited, fail-closed | `payload/` wrapper (identical scope) |
+| Launch format | Structured `launch.command` + `launch.args` (legacy string parsing still accepted on read) | — |
+| Crypto format | Documented `argon2id/m=64MiB/t=3/p=4`, `crypto.format_version: 1` | KEK/DEK envelope in a future format version |
+| Version fields | Separated (§4): schema, bundle, integrity, crypto, application | — |
+| Verification | Strict: `pn run` refuses on any integrity/signature/structural failure | — |
+| `--allow-unverified` | Bypasses trust verification only; never structural/format checks | — |
 
 ### Files to Update
 
-| File | Changes |
-|------|---------|
-| `src/domain/manifest.rs` | Add `crypto.format_version`, `integrity.format_version`, `compatibility`, `launch.args`, split `launch.command` |
-| `src/commands/pack.rs` | Compute integrity over canonical payload; sign canonical JSON; write `signing/public.key` |
-| `src/application/run_bundle_impl.rs` | Verify in sequence (§7); use structured launch |
-| `src/security/integrity.rs` | Document scope; ensure fail-closed behavior |
-| `src/security/signing.rs` | Implement canonical JSON serialization for signing |
-| `src/security/crypto.rs` | Document Argon2id parameters; add format version |
-| `src/cli.rs` | Add `--allow-unverified` (already done) |
+### v0.1.2 state
+
+| File | State |
+|------|-------|
+| `src/domain/manifest.rs` | ✅ `crypto.format_version`, `integrity.format_version`, `compatibility`, `launch.args`, `bundle_version`; strict validation incl. format versions and digest format |
+| `src/application/pack_bundle.rs` | ✅ Canonical pack orchestration: stage → encrypt → checksum → manifest → canonical-JSON sign → `signing/public.key` → validate |
+| `src/commands/pack.rs` | ✅ Thin wrapper delegating to the application layer |
+| `src/application/run_bundle_impl.rs` | ✅ Strict verification sequence (§7); structured launch; compatibility + traversal checks |
+| `src/security/integrity.rs` | ✅ Canonical NUL-delimited payload hashing; fail-closed incl. symlinks |
+| `src/security/signing.rs` | ✅ Canonical JSON signing + bundled-public-key verification |
+| `src/security/crypto.rs` | ✅ Documented Argon2id parameters; `CRYPTO_FORMAT_VERSION` constant |
+| `src/cli.rs` | ✅ `--allow-unverified` boolean flag with documented boundaries |
+| Tests | ✅ Integrity tamper matrix, signature attack matrix, schema validation matrix, CLI black-box tests |
 
 ### Compatibility Strategy
 
-- **Read path**: Support both v0.1.x layout (no `payload/`) and v1.0 layout (with `payload/`)
+- **Read path**: Support both v0.1.x layout (no `payload/`) and v1.0 layout (with `payload/`) — the payload root is resolved per bundle
 - **Write path**: Produce v0.1.x layout for now; add `payload/` in Bundle Format v2
 - **Manifest**: Accept schema_version "0.1" and "0.2"; write "0.2"
-- **Signing**: For v0.1.1, continue signing YAML bytes but document the canonical JSON target
+- **Signing**: v0.1.2 signs and verifies canonical JSON (see §6)
 
 ---
 
