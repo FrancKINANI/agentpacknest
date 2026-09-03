@@ -3,15 +3,31 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use anyhow::{bail, Result};
-use argon2::Argon2;
+use argon2::{Algorithm, Argon2, Params, Version};
 use rand::{rngs::OsRng, RngCore};
 use zeroize::Zeroize;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+/// Argon2id parameters (OWASP recommended baseline for 2024).
+/// These MUST NOT change without incrementing crypto format_version.
+const ARGON2_ALGO: Algorithm = Algorithm::Argon2id;
+const ARGON2_VERSION: Version = Version::V0x13;
+const ARGON2_MEMORY_COST_KIB: u32 = 65536; // 64 MiB
+const ARGON2_TIME_COST: u32 = 3;
+const ARGON2_PARALLELISM: u32 = 4;
+
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
+
+/// Crypto format identifier string.
+/// v1 = AES-256-GCM + Argon2id (m=64MiB, t=3, p=4, salt=16B)
+pub const CRYPTO_FORMAT_IDENTIFIER: &str = "aes-256-gcm/argon2id/v1";
+
+/// Crypto format version (matches CRYPTO_FORMAT_IDENTIFIER).
+/// Increment when algorithm or parameters change.
+pub const CRYPTO_FORMAT_VERSION: u32 = 1;
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -105,7 +121,15 @@ pub fn prompt_passphrase_confirm() -> Result<String> {
 
 fn derive_key(passphrase: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN]> {
     let mut key = [0u8; KEY_LEN];
-    Argon2::default()
+    let params = Params::new(
+        ARGON2_MEMORY_COST_KIB,
+        ARGON2_TIME_COST,
+        ARGON2_PARALLELISM,
+        Some(KEY_LEN),
+    )
+    .map_err(|e| anyhow::anyhow!("invalid argon2 params: {}", e))?;
+    let argon2 = Argon2::new(ARGON2_ALGO, ARGON2_VERSION, params);
+    argon2
         .hash_password_into(passphrase, salt, &mut key)
         .map_err(|e| anyhow::anyhow!("argon2 key derivation failed: {}", e))?;
     // Note: key is zeroized by the caller after use

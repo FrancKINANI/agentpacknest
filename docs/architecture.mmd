@@ -1,0 +1,131 @@
+```mermaid
+graph TD
+    %% CLI Layer
+    CLI[CLI Layer<br/>src/cli.rs<br/>clap definitions, parsing]
+    
+    %% Commands Layer
+    CMD_INIT[commands/init.rs]
+    CMD_PACK[commands/pack.rs]
+    CMD_RUN[commands/run.rs]
+    CMD_INFO[commands/info.rs]
+    CMD_DIFF[commands/diff.rs]
+    CMD_UNLOCK[commands/unlock.rs]
+    CMD_REKEY[commands/rekey.rs]
+    
+    CMDS[Commands Layer<br/>Thin wrappers:<br/>parse args → build requests<br/>user prompts → print output<br/>NO business logic]
+    
+    %% Application Layer
+    APP_INIT[application/init_bundle.rs]
+    APP_PACK[application/pack_bundle.rs<br/><i>to be created</i>]
+    APP_RUN[application/run_bundle_impl.rs]
+    
+    APP[Application Layer<br/>Use case orchestration:<br/>coordinate domain, harness,<br/>infrastructure, security<br/>NO direct I/O, NO harness logic]
+    
+    %% Domain Layer
+    DOM_MANIFEST[domain/manifest.rs]
+    DOM_BUNDLE[domain/bundle.rs]
+    DOM_COMPONENT[domain/component.rs]
+    DOM_ENV[domain/environment.rs]
+    DOM_HARNESS[domain/harness.rs]
+    DOM_ERROR[domain/error.rs]
+    
+    DOM[Domain Layer<br/>Pure types & validation:<br/>Manifest, Bundle, Component,<br/>Environment, HarnessId<br/>NO dependencies]
+    
+    %% Harness Layer
+    HARNESS_TRAITS[harness/types.rs<br/>HarnessAdapter trait]
+    HARNESS_PI[harness/pi/<br/>detect.rs, harness.rs,<br/>launch.rs, paths.rs]
+    HARNESS_AIDER[harness/aider/<br/>skeleton only]
+    HARNESS_REG[harness/registry.rs]
+    
+    HARNESS[Harness Layer<br/>Adapter implementations:<br/>Pi = production<br/>Aider = skeleton<br/>Core knows trait only]
+    
+    %% Infrastructure Layer
+    INFRA_FS[infrastructure/filesystem.rs]
+    INFRA_ARCHIVE[infrastructure/archive.rs]
+    INFRA_IGNORE[infrastructure/ignore.rs]
+    INFRA_PROCESS[infrastructure/process.rs]
+    INFRA_BUNDLE_STORE[infrastructure/bundle_store.rs]
+    
+    INFRA[Infrastructure Layer<br/>Filesystem, archives,<br/>ignore patterns, processes<br/>Pure utilities]
+    
+    %% Security Layer
+    SEC_CRYPTO[security/crypto.rs]
+    SEC_SECRETS[security/secrets.rs]
+    SEC_SIGNING[security/signing.rs]
+    SEC_INTEGRITY[security/integrity.rs]
+    
+    SEC[Security Layer<br/>Pure crypto primitives:<br/>AES-256-GCM, Argon2id,<br/>Ed25519, SHA-256<br/>NO I/O, NO harness knowledge]
+
+    %% Dependencies
+    CLI --> CMDS
+    CMDS --> APP
+    CMDS --> DOM
+    CMDS --> SEC
+    
+    APP --> DOM
+    APP --> HARNESS
+    APP --> INFRA
+    APP --> SEC
+    
+    DOM -.->|zero deps| NONE(( ))
+    
+    HARNESS --> DOM
+    HARNESS --> INFRA
+    HARNESS --> SEC
+    
+    INFRA --> DOM
+    INFRA -.->|stdlib only| NONE
+    
+    SEC -.->|zero deps| NONE
+
+    %% Violations (current)
+    VIOL1[VIOLATION:<br/>app.run_bundle imports<br/>commands.run types]
+    VIOL2[VIOLATION:<br/>commands.pack calls<br/>integrity/signing directly]
+    VIOL3[VIOLATION:<br/>harness/pi knows<br/>Pi-specific paths<br/>(acceptable - adapter)]
+    
+    APP -.-> VIOL1
+    CMDS -.-> VIOL2
+    HARNESS -.-> VIOL3
+
+    classDef layer fill:#f5f5f5,stroke:#333,stroke-width:2px;
+    classDef violation fill:#ffcccc,stroke:#cc0000,stroke-width:2px,stroke-dasharray: 5 5;
+    class CLI,CMDS,APP,DOM,HARNESS,INFRA,SEC layer;
+    class VIOL1,VIOL2,VIOL3 violation;
+```
+
+---
+
+### Layer Responsibilities
+
+| Layer | Files | Responsibility | Must NOT |
+|-------|-------|----------------|----------|
+| **CLI** | `cli.rs` | Argument parsing, help, version | Business logic |
+| **Commands** | `commands/*.rs` | Parse args → requests, prompts, output | Orchestration, crypto, I/O |
+| **Application** | `application/*.rs` | Use case orchestration | Direct I/O, harness specifics |
+| **Domain** | `domain/*.rs` | Types, validation, invariants | Any external dependency |
+| **Harness** | `harness/*.rs` | Adapter implementations | Cross-harness logic |
+| **Infrastructure** | `infrastructure/*.rs` | FS, archive, ignore, process | Domain logic |
+| **Security** | `security/*.rs` | Crypto primitives | I/O, harness, domain logic |
+
+---
+
+### Current Violations to Fix (v0.1.1)
+
+1. **`application/run_bundle_impl.rs` imports `commands::run` types** — Application should define its own request/result types
+2. **`commands/pack.rs` calls `integrity::compute_bundle_checksum` and `signing::sign_manifest` directly** — Should delegate to `application::pack_bundle`
+3. **Harness Pi paths** — Acceptable (it's the adapter), but core application must not know them
+
+---
+
+### Target Architecture (Post v0.1.1)
+
+```
+CLI → Commands → Application → Domain
+                          ↓
+              ┌───────────┼───────────┐
+              ▼           ▼           ▼
+           Harness   Infrastructure  Security
+```
+
+All dependencies flow **downward** (CLI → Commands → Application → Domain/Infra/Sec/Harness).
+No upward or circular dependencies.

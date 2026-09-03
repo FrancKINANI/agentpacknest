@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::fs;
 use std::path::Path;
 
@@ -33,9 +34,15 @@ pub struct Manifest {
     pub launch: Launch,
     pub security: Security,
     pub integrity: Integrity,
+    /// Crypto format version (separate from security.encryption).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crypto: Option<CryptoMeta>,
     /// Snapshot provenance — populated by `pn pack`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<OriginMeta>,
+    /// Compatibility requirements.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<Compatibility>,
 }
 
 fn default_bundle_version() -> u32 {
@@ -129,7 +136,11 @@ pub struct RuntimeRequirement {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Launch {
+    /// Executable name (looked up in PATH).
     pub command: String,
+    /// Arguments passed to the executable (no shell parsing).
+    #[serde(default)]
+    pub args: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
 }
@@ -144,6 +155,14 @@ pub struct Security {
     pub secrets_encrypted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encryption: Option<String>,
+    /// Crypto format version for forward compatibility.
+    /// v1 = AES-256-GCM + Argon2id (m=64MiB, t=3, p=4, salt=16B).
+    #[serde(default = "default_crypto_format_version")]
+    pub format_version: u32,
+}
+
+fn default_crypto_format_version() -> u32 {
+    1
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +174,14 @@ pub struct Integrity {
     pub algorithm: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checksum: Option<String>,
+    /// Format version of the integrity checksum computation.
+    /// v1 = SHA-256 of payload files with NUL-delimited path+content.
+    #[serde(default = "default_integrity_format_version")]
+    pub format_version: u32,
+}
+
+fn default_integrity_format_version() -> u32 {
+    1
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +218,32 @@ pub struct OriginMeta {
     /// Used by `pn diff` to detect drift.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_state_hash: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Crypto format metadata
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CryptoMeta {
+    /// Format version of the crypto envelope.
+    #[serde(default = "default_crypto_format_version")]
+    pub format_version: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Compatibility metadata
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Compatibility {
+    /// Minimum agentpacknest version required to read this bundle.
+    #[serde(default = "default_min_agentpacknest_version")]
+    pub min_agentpacknest_version: String,
+}
+
+fn default_min_agentpacknest_version() -> String {
+    "0.1.0".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -277,18 +330,25 @@ pub fn default_pi(name: &str, harness_version: &str) -> Manifest {
             }],
         },
         launch: Launch {
-            command: "pn run .".to_string(),
+            command: "pi".to_string(),
+            args: vec!["--agent-dir".to_string(), "agent".to_string()],
             working_directory: Some(".".to_string()),
         },
         security: Security {
             secrets_encrypted: false,
             encryption: None,
+            format_version: 1,
         },
         integrity: Integrity {
             algorithm: "sha256".to_string(),
             checksum: None,
+            format_version: 1,
         },
+        crypto: Some(CryptoMeta { format_version: 1 }),
         origin: None,
+        compatibility: Some(Compatibility {
+            min_agentpacknest_version: "0.1.0".to_string(),
+        }),
     }
 }
 
@@ -364,6 +424,35 @@ impl Manifest {
         }
 
         Ok(())
+    }
+
+    /// Produce canonical JSON bytes for signing.
+    /// Uses deterministic serialization with sorted keys.
+    pub fn canonical_json(&self) -> Result<Vec<u8>> {
+        // Serialize to JSON Value, then recursively sort object keys for determinism
+        let value =
+            serde_json::to_value(self).context("failed to serialize manifest to JSON value")?;
+        let canonical = sort_json_keys(value);
+        serde_json::to_vec(&canonical).context("failed to serialize canonical JSON")
+    }
+}
+
+/// Recursively sort JSON object keys for deterministic serialization.
+fn sort_json_keys(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut sorted: Vec<_> = map.into_iter().collect();
+            sorted.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut new_map = serde_json::Map::new();
+            for (k, v) in sorted {
+                new_map.insert(k, sort_json_keys(v));
+            }
+            serde_json::Value::Object(new_map)
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(sort_json_keys).collect())
+        }
+        other => other,
     }
 }
 
@@ -502,17 +591,24 @@ mod tests {
             },
             launch: Launch {
                 command: "pn run .".to_string(),
+                args: vec![],
                 working_directory: Some(".".to_string()),
             },
             security: Security {
                 secrets_encrypted: false,
                 encryption: None,
+                format_version: 1,
             },
             integrity: Integrity {
                 algorithm: "sha256".to_string(),
                 checksum: None,
+                format_version: 1,
             },
+            crypto: Some(CryptoMeta { format_version: 1 }),
             origin: None,
+            compatibility: Some(Compatibility {
+                min_agentpacknest_version: "0.1.0".to_string(),
+            }),
         }
     }
 

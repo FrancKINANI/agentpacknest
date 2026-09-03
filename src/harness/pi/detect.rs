@@ -301,6 +301,7 @@ mod tests {
     }
 
     /// Create a full Pi agent directory.
+    #[allow(dead_code)]
     fn setup_full_agent_dir(dir: &Path) {
         fs::write(dir.join("settings.json"), "{}").unwrap();
         fs::write(dir.join("auth.json"), "{}").unwrap();
