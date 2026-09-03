@@ -70,16 +70,6 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
     println!("Source:     {}", env.source_root.display());
     println!();
 
-    // ── 4b. Validate every declared destination ────────────────────
-    // Core safety policy: destinations are bundle-relative paths that must
-    // stay inside the bundle. Absolute paths and parent traversal (`..`)
-    // are rejected before anything is copied — a misbehaving harness can
-    // describe resources, but it can never direct the copy outside the
-    // bundle root.
-    for component in &env.components {
-        validate_component_destination(&component.destination)?;
-    }
-
     // ── 5. Load ignore patterns ────────────────────────────────────
     let ignore = IgnorePatterns::load(&env.source_root);
     if !ignore.is_empty() {
@@ -246,6 +236,9 @@ fn copy_kind(
 /// Copy a single portable directory component into the bundle.
 ///
 /// Core policy (independent of the harness):
+/// - The declared destination is validated at this write boundary: it must
+///   be a bundle-relative path (no absolute paths, no `..` traversal), so
+///   `bundle_dir.join(destination)` can never escape the bundle root.
 /// - Secret-source files (`auth.json`, `secrets.json`, `.env`, `env`, `*.env`)
 ///   are NEVER copied as plaintext — the harness declares them separately and
 ///   Core encrypts them instead.
@@ -260,6 +253,11 @@ fn copy_component(
     force: bool,
     ignore: &IgnorePatterns,
 ) -> Result<()> {
+    // Write-boundary validation: never join an untrusted destination onto
+    // the bundle root before checking it stays inside. Runs before any
+    // existence/source check so a bad claim is always rejected.
+    validate_component_destination(&component.destination)?;
+
     let src = &component.source;
     if !src.is_dir() {
         if component.required {
@@ -739,6 +737,59 @@ mod tests {
                 good
             );
         }
+    }
+
+    #[test]
+    fn escaping_destination_cannot_write_outside_bundle_root() {
+        // A misbehaving harness describes a component whose destination
+        // traverses out of the bundle. The write boundary must reject it
+        // and no file may ever appear next to the bundle root.
+        let root = TempDir::new().unwrap();
+        let bundle_dir = root.path().join("bundle");
+        fs::create_dir_all(&bundle_dir).unwrap();
+
+        let source = TempDir::new().unwrap();
+        fs::write(source.path().join("settings.json"), "{}").unwrap();
+
+        let evil = PortableComponent {
+            kind: PortableKind::Config,
+            source: source.path().to_path_buf(),
+            destination: PathBuf::from("../escape"),
+            required: true,
+            excludes: vec![],
+            secret_format: None,
+        };
+        let ignore = IgnorePatterns::parse("");
+
+        let err = copy_component(&evil, &bundle_dir, true, &ignore)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("escapes the bundle"), "{}", err);
+
+        // Nothing may exist outside the bundle root — the traversal target
+        // is bundle_dir's parent + "escape".
+        let escape = root.path().join("escape");
+        assert!(
+            !escape.exists(),
+            "copy escaped the bundle root: {}",
+            escape.display()
+        );
+        assert!(!bundle_dir.join("escape").exists());
+
+        // A nested traversal is rejected the same way.
+        let nested = PortableComponent {
+            kind: PortableKind::Config,
+            source: source.path().to_path_buf(),
+            destination: PathBuf::from("agent/../../outside"),
+            required: true,
+            excludes: vec![],
+            secret_format: None,
+        };
+        let err = copy_component(&nested, &bundle_dir, true, &ignore)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("escapes the bundle"), "{}", err);
+        assert!(!root.path().join("outside").exists());
     }
 
     #[test]

@@ -87,12 +87,21 @@ Secrets are decrypted only after all verification passes, and only in memory.
 ### `--allow-unverified` boundaries
 
 `pn run --allow-unverified <bundle>` is a real boolean flag (never a
-positional argument). It bypasses **only trust verification**:
+positional argument). It bypasses **only trust verification** — the checks
+whose failure means "this bundle's authenticity cannot be established":
 
 - payload checksum mismatch (with a strong warning)
 - missing signature
-- invalid signature
-- missing `signing/public.key`
+- invalid signature, including a signature whose bytes cannot even be parsed
+  as an Ed25519 signature (malformed/unreadable signature material)
+- missing `signing/public.key`, or a public key whose bytes cannot be parsed
+  (malformed/unreadable key material)
+- a bundled public key that does not match the signature
+
+In every bypass case a strong warning is printed, and the override never
+makes a **structurally invalid** bundle runnable: the manifest must still
+parse and validate, formats must still be supported, and paths must still
+stay inside the bundle — those checks run regardless of the flag.
 
 It does **NOT** bypass structural validity or format compatibility:
 
@@ -135,7 +144,7 @@ validity or format compatibility.*
 
 | Concept | Where stored | Current |
 |---|---|---|
-| AgentPackNest application version | `agentpacknest_version` | 0.1.2 |
+| AgentPackNest application version | `agentpacknest_version` | 0.2.0 |
 | Bundle format version | `bundle_version` | 1 |
 | Manifest schema version | `schema_version` | "0.2" (accepts "0.1") |
 | Integrity format version | `integrity.format_version` | 1 |

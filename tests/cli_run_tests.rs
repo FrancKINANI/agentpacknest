@@ -181,6 +181,35 @@ fn legacy_embedded_args_manifest_runs_dry_run() {
 }
 
 #[test]
+fn legacy_quoted_command_fails_clearly_not_misparsed() {
+    // A legacy command string containing quoted arguments cannot be
+    // interpreted without shell parsing — it must fail clearly at runtime
+    // preparation, never be silently whitespace-mangled.
+    let (_root, bundle, manifest_path) = signed_bundle("legacy-quoted-agent", "v1");
+
+    let mut m = manifest::load(&manifest_path).unwrap();
+    m.schema_version = "0.1".to_string();
+    m.launch.command = "pi --name \"hello world\"".to_string();
+    m.launch.args = vec![];
+    manifest::save(&manifest_path, &m).unwrap();
+    let sig = signing::sign_canonical_manifest(&m).unwrap();
+    fs::write(bundle.join("manifest.sig"), &sig).unwrap();
+
+    let out = run_pn(&bundle, &["--dry-run"]);
+    let text = all_out(&out);
+    assert!(
+        !out.status.success(),
+        "uninterpretable legacy command must fail, not run:\n{}",
+        text
+    );
+    assert!(
+        text.contains("cannot safely interpret") || text.contains("re-run `pn pack`"),
+        "failure must be a clear error, got:\n{}",
+        text
+    );
+}
+
+#[test]
 fn tampered_payload_refused_by_default() {
     let (_root, bundle, _) = signed_bundle("tamper-agent", "v1");
 
@@ -265,6 +294,88 @@ fn replaced_public_key_refused_by_default() {
         "{}",
         all_out(&out)
     );
+}
+
+// ---------------------------------------------------------------------------
+// Trust-layer bypass is bounded: signature failures are bypassable by the
+// documented policy (SECURITY.md), but only with the override + warnings.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn invalid_signature_bypassable_with_override() {
+    let (_root, bundle, _) = signed_bundle("override-badsig", "v1");
+
+    let sig_path = bundle.join("manifest.sig");
+    let mut sig = fs::read(&sig_path).unwrap();
+    sig[0] ^= 0xff;
+    fs::write(&sig_path, sig).unwrap();
+
+    let out = run_pn(&bundle, &["--allow-unverified", "--dry-run"]);
+    assert!(
+        out.status.success(),
+        "invalid signature is a trust failure — override must bypass with warnings:\n{}",
+        all_out(&out)
+    );
+    let text = all_out(&out);
+    assert!(
+        text.contains("--allow-unverified") && text.contains("WARNING"),
+        "{}",
+        text
+    );
+}
+
+#[test]
+fn replaced_public_key_bypassable_with_override() {
+    let (_root, bundle, _) = signed_bundle("override-key", "v1");
+
+    let mut rng = rand::thread_rng();
+    let attacker = ed25519_dalek::SigningKey::generate(&mut rng);
+    fs::write(
+        bundle.join("signing/public.key"),
+        attacker.verifying_key().to_bytes(),
+    )
+    .unwrap();
+
+    let out = run_pn(&bundle, &["--allow-unverified", "--dry-run"]);
+    assert!(
+        out.status.success(),
+        "replaced public key is a trust failure — override must bypass:\n{}",
+        all_out(&out)
+    );
+    let text = all_out(&out);
+    assert!(text.contains("WARNING"), "{}", text);
+}
+
+#[test]
+fn garbage_signature_refused_by_default_and_bypassable_with_override() {
+    let (_root, bundle, _) = signed_bundle("garbage-sig", "v1");
+    // Unparseable signature material (wrong length, not Ed25519) — the
+    // extreme case of "signature cannot be trusted".
+    fs::write(bundle.join("manifest.sig"), b"not-an-ed25519-signature").unwrap();
+
+    // Default: refuse.
+    let out = run_pn(&bundle, &["--dry-run"]);
+    assert!(
+        !out.status.success(),
+        "garbage signature must be refused by default:\n{}",
+        all_out(&out)
+    );
+    assert!(
+        all_out(&out).contains("signature verification failed"),
+        "{}",
+        all_out(&out)
+    );
+
+    // Override: trust cannot be established, but the override is documented
+    // to proceed in that case (with warnings) — structural checks already
+    // passed (manifest parsed, validated, payload digest intact).
+    let out = run_pn(&bundle, &["--allow-unverified", "--dry-run"]);
+    assert!(
+        out.status.success(),
+        "garbage signature is a trust failure — override must bypass with warnings:\n{}",
+        all_out(&out)
+    );
+    assert!(all_out(&out).contains("WARNING"), "{}", all_out(&out));
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +507,60 @@ fn allow_unverified_does_not_bypass_traversal_workdir() {
     assert!(
         all_out(&out).contains("must stay inside the bundle")
             || all_out(&out).contains("escapes the bundle"),
+        "{}",
+        all_out(&out)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Structural failures can never be bypassed, even by --allow-unverified
+// ---------------------------------------------------------------------------
+
+#[test]
+fn absolute_working_directory_refused_even_with_override() {
+    // launch.working_directory must be bundle-relative; an absolute path is
+    // a structural (format) failure rejected at manifest validation.
+    let (_root, bundle, manifest_path) = signed_bundle("abs-wd-agent", "v1");
+
+    let mut m = manifest::load(&manifest_path).unwrap();
+    m.launch.working_directory = Some("/tmp".to_string());
+    manifest::save(&manifest_path, &m).unwrap();
+
+    let out = run_pn(&bundle, &["--allow-unverified", "--dry-run"]);
+    assert!(
+        !out.status.success(),
+        "absolute working_directory must be refused even with override:\n{}",
+        all_out(&out)
+    );
+    assert!(
+        all_out(&out).contains("must be relative to the bundle root"),
+        "{}",
+        all_out(&out)
+    );
+}
+
+#[test]
+fn missing_declared_secrets_file_refused_even_with_override() {
+    // The manifest declares secrets_encrypted but secrets/keys.enc is absent:
+    // a structurally broken bundle. Decryption is attempted only after
+    // verification — and the missing file is refused regardless of override.
+    let (_root, bundle, manifest_path) = signed_bundle("no-keys-agent", "v1");
+
+    let mut m = manifest::load(&manifest_path).unwrap();
+    m.security.secrets_encrypted = true;
+    m.security.encryption = Some("aes-256-gcm".to_string());
+    manifest::save(&manifest_path, &m).unwrap();
+    let sig = signing::sign_canonical_manifest(&m).unwrap();
+    fs::write(bundle.join("manifest.sig"), &sig).unwrap();
+
+    let out = run_pn(&bundle, &["--allow-unverified", "--dry-run"]);
+    assert!(
+        !out.status.success(),
+        "missing declared secrets file must be refused even with override:\n{}",
+        all_out(&out)
+    );
+    assert!(
+        all_out(&out).contains("secrets/keys.enc is missing"),
         "{}",
         all_out(&out)
     );

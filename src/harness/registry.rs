@@ -58,7 +58,7 @@ impl HarnessRegistry {
         let id = HarnessId::from_name(name).ok_or_else(|| {
             let supported: Vec<_> = self.supported_ids().iter().map(|h| h.to_string()).collect();
             anyhow::anyhow!(
-                "unsupported harness '{}'\n  supported: {}\n  hint: only 'pi' is fully supported in pn v0.1",
+                "unsupported harness '{}'\n  supported: {}\n  hint: only 'pi' is fully supported in pn v0.2",
                 name,
                 supported.join(", ")
             )

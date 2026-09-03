@@ -386,7 +386,7 @@ impl Manifest {
         let known_harnesses = ["pi"];
         if !known_harnesses.contains(&self.harness.name.as_str()) {
             bail!(
-                "unknown harness '{}'\n  supported harnesses: {}\n  hint: only 'pi' is supported in pn v0.1",
+                "unknown harness '{}'\n  supported harnesses: {}\n  hint: only 'pi' is supported in pn v0.2",
                 self.harness.name,
                 known_harnesses.join(", ")
             );

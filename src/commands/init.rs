@@ -19,7 +19,7 @@ pub fn execute(
 
     if !id.is_fully_supported() {
         bail!(
-            "unsupported harness: `{}`\n  supported harnesses: pi\n  hint: only 'pi' is available in pn v0.1",
+            "unsupported harness: `{}`\n  supported harnesses: pi\n  hint: only 'pi' is available in pn v0.2",
             harness
         );
     }
