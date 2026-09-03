@@ -60,16 +60,16 @@ pn run .
 ### Examples
 
 ```bash
-# Init with Aider harness
-pn init --harness aider --name research-agent
+# Init to a named output directory
+pn init --harness pi --path ~/.pi/agent --name my-agent --output ./bundles/my-agent
 
-# Pack everything and create encrypted archive
-pn pack --all --archive --encrypt-archive --path ~/.pi/agent
+# Pack everything and create a .tar.gz archive
+pn pack --all --archive --path ~/.pi/agent
 
-# Check bundle freshness
+# Check bundle freshness vs. the local harness
 pn diff . --path ~/.pi/agent
 
-# Rotate passphrase
+# Rotate the secrets passphrase
 pn rekey .
 ```
 
@@ -90,7 +90,6 @@ my-agent/
 │       └── themes/        # UI themes
 ├── secrets/
 │   └── keys.enc           # Encrypted secrets (AES-256-GCM + Argon2id)
-└── launch                 # Launch script (placeholder)
 ```
 
 The **payload** (`agent/` + `secrets/keys.enc`) is hashed with a deterministic
@@ -98,6 +97,11 @@ SHA-256 digest stored in `manifest.yaml`; the manifest is signed with Ed25519
 over a canonical JSON representation. Verification is **portable**: `pn run`
 and `pn info` verify against the public key bundled in `signing/public.key` —
 no local keypair is needed to verify a bundle.
+
+How the agent starts is defined **in the manifest** (`launch.command` +
+`launch.args` + `launch.working_directory`) — there is no launch script in the
+bundle. `pn run` refuses to launch unless the payload digest and the manifest
+signature verify.
 
 ## Security
 
@@ -137,18 +141,24 @@ agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the f
 | Harness | Status | Notes |
 |---|---|---|
 | [Pi](https://pi.dev) | ✅ Full support | Detection, config, skills, memory, secrets (`auth.json`, `.env`, `secrets/`) |
-| [Aider](https://aider.chat) | 🔨 Skeleton | Detection planned, pack not yet implemented |
+| [Aider](https://aider.chat) | 🔨 Skeleton | Binary/config detection scaffolded; `init`/`pack`/`run` not yet wired up |
 | Claude Code | 📋 Planned | — |
 | Codex | 📋 Planned | — |
+
+The `Harness` trait, registry, and Pi/Aider adapters exist in the codebase
+(`src/harness/`) but only Pi is wired through `pn init`/`pn pack`/`pn run`
+end-to-end. Aider support is the target of v0.2.
 
 ## Roadmap
 
 - **v0.1** — Pi harness rock-solid (released)
 - **v0.1.2** — Format, integrity & trust foundation (current): canonical bundle format, deterministic payload integrity, portable signature verification, strict `pn run` enforcement, schema failure matrix
-- **v0.2** — Multi-harness platform work
-- **v0.3** — Second harness (Aider or Claude Code)
-- **v0.4** — MCP config + dependency management
-- **v0.5** — Trust chain + publish/pull
+- **v0.2** — Second harness end-to-end: wire Aider through `init`/`pack`/`run` on the existing `Harness` abstraction
+- **v0.3** — MCP config + dependency management
+- **v0.4** — Trust chain + publish/pull
+
+The v0.1.x bundle format, integrity model, and security boundaries are **frozen**
+as of v0.1.2 — v0.2 changes nothing about them unless a real bug demands it.
 
 ## Contributing
 

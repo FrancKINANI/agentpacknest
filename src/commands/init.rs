@@ -60,15 +60,7 @@ pub fn execute(
 
     println!("Created bundle structure in {}/", out_dir.display());
 
-    // ── 5. Create launch placeholder ───────────────────────────────
-    let launch_content = format!(
-        "#!/usr/bin/env bash\n# Launch script for {}\n# Edit this file to define how the agent starts.\n\necho \"Agent '{}' is starting...\"\n",
-        agent_name, agent_name
-    );
-    fs::write(out_dir.join("launch"), &launch_content)
-        .context("failed to write launch placeholder")?;
-
-    // ── 6. Generate manifest.yaml ──────────────────────────────────
+    // ── 5. Generate manifest.yaml ──────────────────────────────────
     let mut m = manifest::default_pi(&agent_name, pi.version());
 
     // Fill in the runtime requirement with detected version
@@ -81,7 +73,7 @@ pub fn execute(
 
     println!("Wrote manifest.yaml");
 
-    // ── 7. Summary ─────────────────────────────────────────────────
+    // ── 6. Summary ─────────────────────────────────────────────────
     println!();
     println!("Bundle '{}' initialized successfully!", agent_name);
     println!("  Harness:    pi v{}", pi.version());

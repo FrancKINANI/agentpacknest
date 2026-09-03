@@ -77,7 +77,7 @@ The current implementation (v0.1.x) uses a slightly different layout at the bund
 | `manifest.sig` | Signature — cannot be covered by its own signature |
 | `signing/public.key` | Verification key — not part of the portable environment |
 | `optional/` | Future extensibility — explicitly outside integrity boundary |
-| `launch` (root) | Legacy placeholder — not part of portable payload |
+| `launch` (root) | Legacy placeholder from older `pn init` — never executed; `pn run` uses `manifest.launch` (not created since v0.1.2) |
 
 ### Harness-Specific Payload Rules
 
@@ -391,7 +391,8 @@ pn run <bundle>
 ┌─────────────────────────────────────────────────────────────┐
 │ 7. DECRYPT SECRETS (only after all above pass)              │
 │    - Prompt for passphrase (or use --passphrase flag)       │
-│    - Decrypt secrets/keys.enc using KEK/DEK envelope        │
+│    - Decrypt secrets/keys.enc with the Argon2id-derived     │
+│      AES-256-GCM key (see §10 Secret Blob Format)           │
 │    - Zeroize passphrase and plaintext after use             │
 └─────────────────────────────────────────────────────────────┘
     │
@@ -625,7 +626,7 @@ Command::new(&manifest.launch.command)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    APPLICATION LAYER                             │
-│  src/application/{init_bundle, pack_bundle, run_bundle}.rs      │
+│  src/application/{pack_bundle, run_bundle, run_bundle_impl}.rs  │
 │  src/application/mod.rs                                         │
 │  • Orchestrate use cases                                        │
 │  • Coordinate domain, harness, infrastructure, security         │
