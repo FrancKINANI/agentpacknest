@@ -3,24 +3,15 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::harness::types::HarnessAdapter;
-
 /// Detected Pi installation on disk.
 ///
-/// Real directory layout (typical):
+/// `PiInstallation` is **detection only**: given a `--path` override (or the
+/// standard env-var / home-dir resolution ladder), it tells you whether a Pi
+/// agent directory exists, where it is, and what version it reports.
 ///
-///   ~/.pi/agent/
-///     settings.json        # config
-///     auth.json            # secrets (API keys, OAuth)
-///     models-store.json
-///     sessions/            # memory / history (.jsonl)
-///     extensions/
-///     skills/
-///     prompts/
-///     themes/
-///     npm/
-///     git/
-///     packages/
+/// Which parts of the installation are portable — config files, memory,
+/// packages, secret sources — is the vocabulary of [`PiHarness::discover`]
+/// in `harness/pi/harness.rs`, not of this type.
 #[derive(Debug)]
 pub struct PiInstallation {
     /// The resolved agent directory (e.g. `~/.pi/agent`).
@@ -36,52 +27,25 @@ const PI_CODING_AGENT_DIR: &str = "PI_CODING_AGENT_DIR";
 /// Legacy fallback (will be used with a deprecation warning).
 const PI_HOME: &str = "PI_HOME";
 
-// ── HarnessAdapter implementation ────────────────────────────────────────────
-
-impl HarnessAdapter for PiInstallation {
-    fn name(&self) -> &str {
-        "pi"
-    }
-
-    fn version(&self) -> &str {
-        &self.version
-    }
-
-    fn root(&self) -> &Path {
+impl PiInstallation {
+    /// Root directory of the detected installation (the agent dir).
+    pub fn root(&self) -> &Path {
         &self.agent_dir
     }
 
-    /// Override default config path — Pi uses `settings.json` at root.
-    fn config_path(&self) -> PathBuf {
-        self.agent_dir.clone()
+    /// The detected version string.
+    pub fn version(&self) -> &str {
+        &self.version
     }
 
-    /// Override: Pi stores sessions in `sessions/`.
-    fn memory_path(&self) -> PathBuf {
-        self.agent_dir.join("sessions")
-    }
-
-    /// Override: Pi has `skills/` at root.
-    fn skills_path(&self) -> PathBuf {
-        self.agent_dir.join("skills")
-    }
-
-    /// Override: Pi has `themes/` at root.
-    fn themes_path(&self) -> PathBuf {
-        self.agent_dir.join("themes")
-    }
-
-    /// Override: Pi has `extensions/` at root.
-    fn extensions_path(&self) -> PathBuf {
-        self.agent_dir.join("extensions")
-    }
-
-    /// Override: Pi has `packages/` at root.
-    fn packages_path(&self) -> PathBuf {
-        self.agent_dir.join("packages")
-    }
-
-    fn detect(path: Option<PathBuf>) -> Result<Self> {
+    /// Detect an installation.
+    ///
+    /// Resolution order:
+    /// 1. Explicit `--path` argument
+    /// 2. `PI_CODING_AGENT_DIR` env var (canonical)
+    /// 3. `~/.pi/agent/` (standard location)
+    /// 4. `PI_HOME` env var or `~/.pi/` (legacy, with warning)
+    pub fn detect(path: Option<PathBuf>) -> Result<Self> {
         let (agent_dir, is_legacy) = resolve_agent_dir(path)?;
         Self::validate(&agent_dir)?;
         let version = Self::read_version(&agent_dir);
@@ -97,7 +61,8 @@ impl HarnessAdapter for PiInstallation {
         Ok(Self { agent_dir, version })
     }
 
-    fn is_valid_install(path: &Path) -> bool {
+    /// Verify that a directory looks like a valid installation of this harness.
+    pub fn is_valid_install(path: &Path) -> bool {
         if !path.is_dir() {
             return false;
         }
@@ -119,7 +84,8 @@ impl HarnessAdapter for PiInstallation {
         has_sessions || has_extensions || has_skills || has_packages
     }
 
-    fn read_version(path: &Path) -> String {
+    /// Try to read the version from the installation.
+    pub fn read_version(path: &Path) -> String {
         // Try VERSION file first
         let version_file = path.join("VERSION");
         if let Ok(content) = fs::read_to_string(&version_file) {
@@ -168,31 +134,6 @@ impl HarnessAdapter for PiInstallation {
         }
 
         "unknown".to_string()
-    }
-}
-
-// ── Pi-specific methods ──────────────────────────────────────────────────────
-
-#[allow(dead_code)]
-impl PiInstallation {
-    /// Path to `auth.json` (API keys, OAuth tokens).
-    pub fn auth_path(&self) -> PathBuf {
-        self.agent_dir.join("auth.json")
-    }
-
-    /// Path to `settings.json`.
-    pub fn settings_path(&self) -> PathBuf {
-        self.agent_dir.join("settings.json")
-    }
-
-    /// Path to `sessions/` directory.
-    pub fn sessions_path(&self) -> PathBuf {
-        self.agent_dir.join("sessions")
-    }
-
-    /// Path to `prompts/` directory.
-    pub fn prompts_path(&self) -> PathBuf {
-        self.agent_dir.join("prompts")
     }
 
     /// Validate that a path looks like a real Pi agent directory.
@@ -300,18 +241,6 @@ mod tests {
         fs::create_dir_all(dir.join("sessions")).unwrap();
     }
 
-    /// Create a full Pi agent directory.
-    #[allow(dead_code)]
-    fn setup_full_agent_dir(dir: &Path) {
-        fs::write(dir.join("settings.json"), "{}").unwrap();
-        fs::write(dir.join("auth.json"), "{}").unwrap();
-        fs::create_dir_all(dir.join("sessions")).unwrap();
-        fs::create_dir_all(dir.join("extensions")).unwrap();
-        fs::create_dir_all(dir.join("skills")).unwrap();
-        fs::create_dir_all(dir.join("themes")).unwrap();
-        fs::create_dir_all(dir.join("packages")).unwrap();
-    }
-
     // ── is_valid_install ────────────────────────────────────────────
 
     #[test]
@@ -357,7 +286,6 @@ mod tests {
         setup_agent_dir(dir.path());
 
         let pi = PiInstallation::detect(Some(dir.path().to_path_buf())).unwrap();
-        assert_eq!(pi.name(), "pi");
         assert_eq!(pi.root(), dir.path());
     }
 
@@ -420,31 +348,6 @@ mod tests {
         assert_eq!(PiInstallation::read_version(dir.path()), "unknown");
     }
 
-    // ── Pi-specific paths ───────────────────────────────────────────
-
-    #[test]
-    fn pi_paths_are_correct() {
-        let dir = TempDir::new().unwrap();
-        setup_agent_dir(dir.path());
-
-        let pi = PiInstallation::detect(Some(dir.path().to_path_buf())).unwrap();
-
-        // Config is the agent dir itself (settings.json is there)
-        assert_eq!(pi.config_path(), dir.path());
-        // Sessions = memory
-        assert_eq!(pi.memory_path(), dir.path().join("sessions"));
-        // Other paths
-        assert_eq!(pi.packages_path(), dir.path().join("packages"));
-        assert_eq!(pi.skills_path(), dir.path().join("skills"));
-        assert_eq!(pi.themes_path(), dir.path().join("themes"));
-        assert_eq!(pi.extensions_path(), dir.path().join("extensions"));
-        // Pi-specific
-        assert_eq!(pi.auth_path(), dir.path().join("auth.json"));
-        assert_eq!(pi.settings_path(), dir.path().join("settings.json"));
-        assert_eq!(pi.sessions_path(), dir.path().join("sessions"));
-        assert_eq!(pi.prompts_path(), dir.path().join("prompts"));
-    }
-
     // ── validate ────────────────────────────────────────────────────
 
     #[test]
@@ -466,7 +369,6 @@ mod tests {
             let agent_dir = home.join(".pi").join("agent");
             if agent_dir.is_dir() {
                 let pi = PiInstallation::detect(None).unwrap();
-                assert_eq!(pi.name(), "pi");
                 assert!(pi.root().exists());
             }
         }

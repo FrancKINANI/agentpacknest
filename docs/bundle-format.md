@@ -81,15 +81,19 @@ The current implementation (v0.1.x) uses a slightly different layout at the bund
 
 ### Harness-Specific Payload Rules
 
-**Pi Harness (v0.1.x)**:
-- `agent/config/` ← `~/.pi/agent/config/`
+**Pi Harness (v0.1.x → v0.2 component model)**: the mapping below is declared
+by `PiHarness::discover()` (`src/harness/pi/harness.rs`) and consumed by Core:
+- `agent/config/` ← loose config files at the Pi agent root (`~/.pi/agent/settings.json`, …)
 - `agent/memory/` ← `~/.pi/agent/sessions/` (portable subset)
 - `agent/packages/extensions/` ← `~/.pi/agent/packages/extensions/`
 - `agent/packages/skills/` ← `~/.pi/agent/packages/skills/`
 - `agent/packages/themes/` ← `~/.pi/agent/packages/themes/`
-- `secrets/keys.enc` ← `~/.pi/agent/auth.json` + `.env` files → encrypted
+- `secrets/keys.enc` ← encrypted by Core from Pi's declared secret sources:
+  `auth.json` (JSON credentials), `secrets/` (key-per-file), and `.env`-style
+  files at the agent root and under `config/` — never copied as plaintext
 
-**Future harnesses** must define their portable component mapping explicitly in their `HarnessAdapter` implementation.
+**Future harnesses** must define their portable component mapping explicitly in their
+`Harness::discover()` implementation (`src/harness/traits.rs`).
 
 ---
 
@@ -642,7 +646,7 @@ Command::new(&manifest.launch.command)
 │  • manifest.rs        │ │  • pi/        │ │  • filesystem.rs      │
 │  • bundle.rs          │ │  • aider/     │ │  • archive.rs         │
 │  • component.rs       │ │  • traits.rs  │ │  • ignore.rs          │
-│  • environment.rs     │ │  • types.rs   │ │  • process.rs         │
+│  • environment.rs     │ │  • registry.rs│ │  • process.rs         │
 │  • harness.rs         │ │               │ │  • bundle_store.rs    │
 └───────────────────────┘ └───────────────┘ └───────────────────────┘
               │               │               │
@@ -669,10 +673,12 @@ Command::new(&manifest.launch.command)
 | Infrastructure | Domain (types), stdlib |
 | Security | **Nothing** (pure crypto) |
 
-**Current violations to fix (v0.1.1)**:
-- `application/run_bundle_impl.rs` imports `commands::run` types (should be self-contained)
-- `commands/pack.rs` directly calls `compute_bundle_checksum` and `sign_manifest` (should delegate to application)
-- `harness/pi/` knows Pi-specific paths (acceptable — it's the adapter)
+**Resolved**:
+- ~~`application/run_bundle_impl.rs` imports `commands::run` types~~ — `RunBundleRequest`/`RunResult` now live in the application layer.
+- ~~`commands/pack.rs` calls `compute_bundle_checksum`/`sign_manifest` directly~~ — the pack sequence lives in `application/pack_bundle.rs`; commands delegate.
+- ~~`harness/pi/` exposes Pi paths to application code~~ — Pi layout vocabulary is declared by `PiHarness::discover()` and consumed by Core as `PortableComponent`s; `harness/pi/` is the adapter and nothing outside `harness/` imports it.
+
+Remaining command-layer deviations (init scaffolding, pack `--archive`, info/unlock/rekey) are tracked for v0.2 — see `docs/architecture.mmd`.
 
 ---
 

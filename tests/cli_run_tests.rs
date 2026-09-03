@@ -132,6 +132,52 @@ fn valid_signed_bundle_dry_run_succeeds() {
     assert!(text.contains("Checksum: ✓ verified"), "{}", text);
     assert!(text.contains("Signature: ✓ verified"), "{}", text);
     assert!(text.contains("dry run"), "{}", text);
+
+    // prepare_runtime preserves argument boundaries: the executable is `pi`
+    // and `--agent-dir agent` stays a separate, structured argument pair.
+    assert!(
+        text.contains("Command:     pi --agent-dir agent"),
+        "structured args must stay separated:\n{}",
+        text
+    );
+}
+
+#[test]
+fn legacy_embedded_args_manifest_runs_dry_run() {
+    // Schema 0.1 manifests embed arguments inside launch.command with no
+    // structured launch.args. PiHarness::prepare_runtime must reduce the
+    // command to the executable name (`pi`) and split the embedded args out
+    // — the legacy path must never try to spawn "pi --agent-dir agent" as a
+    // single binary name.
+    let (_root, bundle, manifest_path) = signed_bundle("legacy-agent", "v1");
+
+    let mut m = manifest::load(&manifest_path).unwrap();
+    m.schema_version = "0.1".to_string();
+    m.launch.command = "pi --agent-dir agent".to_string();
+    m.launch.args = vec![];
+    manifest::save(&manifest_path, &m).unwrap();
+    let sig = signing::sign_canonical_manifest(&m).unwrap();
+    fs::write(bundle.join("manifest.sig"), &sig).unwrap();
+
+    let out = run_pn(&bundle, &["--dry-run"]);
+    let text = all_out(&out);
+    assert!(
+        out.status.success(),
+        "legacy embedded-args manifest must dry-run successfully:\n{}",
+        text
+    );
+    assert!(text.contains("Checksum: ✓ verified"), "{}", text);
+    assert!(text.contains("Signature: ✓ verified"), "{}", text);
+    assert!(
+        text.contains("Command:     pi --agent-dir agent"),
+        "embedded args must be split out of the command:\n{}",
+        text
+    );
+    assert!(
+        !text.contains("Command:     pi --agent-dir agent --agent-dir agent"),
+        "embedded args must not be duplicated:\n{}",
+        text
+    );
 }
 
 #[test]

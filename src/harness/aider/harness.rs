@@ -1,15 +1,24 @@
-//! AiderHarness — adapter for the Aider coding agent.
+//! AiderHarness — detection scaffold for the Aider coding agent.
 //!
-//! Aider is a Python-based coding agent. Unlike Pi, it doesn't have
-//! a global installation directory — it operates per-project.
+//! Aider is a Python-based coding agent. Unlike Pi, it doesn't have a global
+//! installation directory — it operates per-project.
+//!
+//! **Status (v0.2): detection-only.** Aider is not yet wired end-to-end
+//! through `init`/`pack`/`run`. `discover()` and `prepare_runtime()` are
+//! intentionally unsupported until a real Aider environment can be validated
+//! against the portable-environment contract.
 
-use super::super::super::domain::harness::HarnessId;
-use super::super::traits::{DetectionResult, Harness};
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Aider harness adapter.
+use crate::domain::harness::HarnessId;
+use crate::harness::traits::{
+    DetectionResult, Harness, HarnessContext, PortableEnvironment, PrepareRuntimeRequest,
+    PreparedRuntime,
+};
+
+/// Aider harness adapter (detection scaffold).
 pub struct AiderHarness;
 
 impl AiderHarness {
@@ -25,15 +34,11 @@ impl Default for AiderHarness {
 }
 
 impl Harness for AiderHarness {
-    fn id(&self) -> HarnessId {
+    fn identity(&self) -> HarnessId {
         HarnessId::Aider
     }
 
-    fn name(&self) -> &str {
-        "aider"
-    }
-
-    fn detect(&self, explicit_path: Option<&Path>) -> Result<DetectionResult> {
+    fn detect(&self, context: &HarnessContext) -> Result<DetectionResult> {
         // 1. Find the aider binary
         let binary = find_aider_binary()?;
 
@@ -41,7 +46,7 @@ impl Harness for AiderHarness {
         let version = get_aider_version(&binary)?;
 
         // 3. Resolve project directory
-        let root = match explicit_path {
+        let root = match context.explicit_path.as_deref() {
             Some(p) if p.is_dir() => p.to_path_buf(),
             Some(p) => bail!("path is not a directory: {}", p.display()),
             None => std::env::current_dir()
@@ -55,31 +60,18 @@ impl Harness for AiderHarness {
         })
     }
 
-    fn is_valid_install(&self, path: &Path) -> bool {
-        // Aider is valid if there's a config file or .env in the project
-        path.join(".aider.conf.yml").is_file()
-            || path.join(".env").is_file()
-            || path.join(".aider").is_dir()
+    fn discover(&self, _context: &HarnessContext) -> Result<PortableEnvironment> {
+        bail!(
+            "aider harness is a detection-only scaffold in v0.2\n  \
+             portable-environment discovery for aider is not implemented yet"
+        )
     }
 
-    fn config_path(&self, root: &Path) -> PathBuf {
-        root.to_path_buf() // .aider.conf.yml is in project root
-    }
-
-    fn memory_path(&self, root: &Path) -> PathBuf {
-        root.to_path_buf() // chat history is per-repo
-    }
-
-    fn packages_path(&self, root: &Path) -> PathBuf {
-        root.to_path_buf() // CONVENTIONS.md is in project root
-    }
-
-    fn secrets_path(&self, root: &Path) -> PathBuf {
-        root.to_path_buf() // .env is in project root
-    }
-
-    fn launch_command(&self) -> &str {
-        "aider"
+    fn prepare_runtime(&self, _request: PrepareRuntimeRequest) -> Result<PreparedRuntime> {
+        bail!(
+            "aider harness is a detection-only scaffold in v0.2\n  \
+             runtime preparation for aider is not implemented yet"
+        )
     }
 }
 

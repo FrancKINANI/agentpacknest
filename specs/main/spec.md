@@ -8,17 +8,25 @@ P2.2 (CI) are complete. This spec covers the remaining items.
 
 ## What to Build
 
-### 1. Multi-Harness Abstraction (P2.1)
+### 1. Second Harness End-to-End (P2.1)
 
-The `HarnessAdapter` trait exists but is partially implemented.
-The Aider harness has a skeleton (`harness/aider/`) but no real detection.
+The single `Harness` contract (`src/harness/traits.rs`:
+`detect` → `discover` → `prepare_runtime`) is **live and fully wired for Pi**:
+`pn init`/`pn pack`/`pn run` resolve harnesses through `HarnessRegistry`, and
+all Pi layout vocabulary (config/memory/packages/secret sources, Node ≥ 20) is
+declared by `PiHarness::discover()` — the application layer never hardcodes Pi
+paths. The Aider harness (`harness/aider/harness.rs`) is a **detection-only
+scaffold**: `detect()` finds the binary and version, while `discover()` and
+`prepare_runtime()` return clean "not implemented" errors.
 
-**Acceptance Criteria:**
-- `HarnessAdapter` trait methods are all exercised by Pi
-- Aider `detect()` works: finds `aider` binary via `which`, reads version
-- Aider paths resolve correctly (`.aider.conf.yml`, `.env`, `.aider/`)
-- `pn init --harness aider` creates a valid bundle with correct launch command
-- `pn pack` for Aider copies config/skills correctly
+**Acceptance Criteria (v0.2):**
+- The `Harness` contract methods are exercised by Pi end-to-end
+  (detect/discover at pack time, prepare_runtime at run time)
+- Aider `discover()` describes its portable environment
+  (`.aider.conf.yml`, `.env`, `.aider/` chat history)
+- Aider `prepare_runtime()` returns a valid launch spec
+- `pn init --harness aider` creates a valid bundle with the correct launch command
+- `pn pack`/`pn run` for Aider copy config/secrets correctly
 
 ### 2. Windows Detection (P2.3)
 
@@ -31,7 +39,8 @@ Pi detection currently only works on Unix (~/.pi/agent, PI_HOME, etc.).
 
 ## Constraints
 
-- Don't break existing Pi workflow
-- Aider support is detection + paths only (no pack copy logic yet for Aider)
+- Don't break the existing Pi workflow (Pi is behind the live contract)
+- Aider support is detection + paths first, then end-to-end wiring on the
+  same `Harness` contract
 - Windows: detection-only, no full support required
 - All changes must pass CI (clippy -D warnings, fmt, tests)

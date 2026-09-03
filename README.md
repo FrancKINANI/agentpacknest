@@ -145,20 +145,31 @@ agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the f
 | Claude Code | 📋 Planned | — |
 | Codex | 📋 Planned | — |
 
-The `Harness` trait, registry, and Pi/Aider adapters exist in the codebase
-(`src/harness/`) but only Pi is wired through `pn init`/`pn pack`/`pn run`
-end-to-end. Aider support is the target of v0.2.
+AgentPackNest drives every harness through one contract (`src/harness/traits.rs`):
+`detect` (is it installed, where, what version) → `discover` (which resources
+form its portable environment) → `prepare_runtime` (runtime prerequisites +
+final launch spec). **Pi is the reference implementation** — it is fully wired
+through `pn init`/`pn pack`/`pn run`/`pn diff` on this abstraction, and all Pi
+layout knowledge (config/memory/packages/secret sources, Node ≥ 20) is declared
+by the Pi harness, never hardcoded in the application layer. The Core copies
+and encrypts only what harnesses describe, and validates every declared
+destination so nothing can be written outside the bundle.
+
+Aider exists as a detection-only skeleton implementing the same contract
+(`discover`/`prepare_runtime` return clean "not implemented" errors). It is
+**not** wired through `init`/`pack`/`run` — that remains future work.
 
 ## Roadmap
 
 - **v0.1** — Pi harness rock-solid (released)
-- **v0.1.2** — Format, integrity & trust foundation (current): canonical bundle format, deterministic payload integrity, portable signature verification, strict `pn run` enforcement, schema failure matrix
-- **v0.2** — Second harness end-to-end: wire Aider through `init`/`pack`/`run` on the existing `Harness` abstraction
+- **v0.1.2** — Format, integrity & trust foundation (released): canonical bundle format, deterministic payload integrity, portable signature verification, strict `pn run` enforcement, schema failure matrix
+- **v0.2** — Harness architecture (current): Pi fully migrated behind the single `Harness` contract; Core owns generic bundle/security behavior, harnesses describe their environments
+- **Next** — Wire a second harness (Aider) end-to-end through `init`/`pack`/`run` on the existing contract
 - **v0.3** — MCP config + dependency management
 - **v0.4** — Trust chain + publish/pull
 
 The v0.1.x bundle format, integrity model, and security boundaries are **frozen**
-as of v0.1.2 — v0.2 changes nothing about them unless a real bug demands it.
+as of v0.1.2 — v0.2 changed nothing about them.
 
 ## Contributing
 
