@@ -36,9 +36,12 @@ These three questions are different, and agentpacknest answers only the first tw
 | **Signature validity** — "Was this manifest signed by the holder of the private key matching this public key?" | Ed25519 verification of the canonical manifest against the **bundled** public key | Signature |
 | **Trust** — "Do I trust the person who owns that key?" | **Not answered.** No PKI, certificates, key registry, or trust network exists in v0.1.2 | Out of scope |
 
-A valid signature proves authorship of the manifest by the key holder. It does
-NOT prove the bundle is safe to run or that the signer is trustworthy. Decide
-whose public keys you accept before running a bundle.
+A valid signature proves that the signer controlled the private key
+corresponding to the bundled public key at signing time. It does NOT prove the
+signer's real-world identity or "authorship" in a legal/editorial sense, and it
+does NOT prove the bundle is safe to run or that the signer is trustworthy.
+Cryptographic signer identity ≠ human identity. Decide whose public keys you
+accept before running a bundle.
 
 ## Public-Key Portability
 
@@ -113,7 +116,7 @@ validity or format compatibility.*
 | **Compromised dependency / runtime** | If Node.js (Pi) or another runtime is compromised, the agent process is compromised. |
 | **Brute-force on keys.enc** | Argon2id makes this harder but not impossible. Use strong passphrases. |
 | **Core dump / swap leakage** | If the OS writes process memory to disk (core dump, swap), zeroized buffers may still contain traces. Consider disabling core dumps for sensitive operations. |
-| **Untrusted signers** | A bundle signed by an attacker's key verifies as valid. Signatures prove authorship, not safety. Decide which keys you trust before running. |
+| **Untrusted signers** | A bundle signed by an attacker's key verifies as valid. Signatures prove control of the matching private key, not identity or safety. Decide which keys you trust before running. |
 | **Timing attacks on signature verification** | Ed25519 is constant-time by design, but the `verify()` wrapper does not guarantee constant-time comparison of the result. |
 
 ## Cryptographic Decisions
@@ -147,7 +150,7 @@ Any value outside the supported set is refused explicitly.
 3. **Don't store bundles with secrets on shared drives** without encryption
 4. **Run `pn rekey` periodically** to rotate passphrases
 5. **Never run `--allow-unverified`** on bundles you do not fully control
-6. **Decide which signers you trust** — signatures prove authorship, not safety
+6. **Decide which signers you trust** — signatures prove private-key control, not identity or safety
 7. **Check `pn info`** to inspect a bundle's integrity/signature status
 
 ## Reporting Security Issues

@@ -9,9 +9,11 @@
 //!
 //! This is NOT a security boundary — it's a tamper-evident seal.
 //!
-//! IMPORTANT: A valid signature proves the manifest matches a particular
-//! signing key. Trusting that key is a SEPARATE problem. This implementation
-//! does NOT provide a PKI, certificate authority, or trust network.
+//! IMPORTANT: A valid signature proves control of the private key
+//! corresponding to the public key used for verification — it does NOT prove
+//! the signer's real-world identity or that the signer is trustworthy.
+//! Trusting a key is a SEPARATE problem. This implementation does NOT provide
+//! a PKI, certificate authority, or trust network.
 
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::Verifier;
