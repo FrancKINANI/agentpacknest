@@ -1,3 +1,4 @@
+pub mod decrypt;
 pub mod diff;
 pub mod info;
 pub mod init;
@@ -69,6 +70,10 @@ pub fn dispatch(cli: Cli) -> Result<Option<RunResult>> {
             };
             let result = crate::application::run_bundle::execute(request)?;
             Ok(Some(result))
+        }
+        Commands::Decrypt { file } => {
+            decrypt::execute(file)?;
+            Ok(None)
         }
         Commands::Diff { bundle, path } => {
             diff::execute(bundle, path)?;

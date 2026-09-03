@@ -55,6 +55,7 @@ pn run .
 | `pn info` | Display bundle metadata and reproducibility score |
 | `pn diff` | Compare bundle with local harness state |
 | `pn unlock` | Decrypt and inspect secrets (masked by default) |
+| `pn decrypt` | Decrypt a `.tar.gz.enc` archive back to `.tar.gz` |
 | `pn rekey` | Rotate passphrase without re-packing |
 
 ### Examples
@@ -65,6 +66,12 @@ pn init --harness pi --path ~/.pi/agent --name my-agent --output ./bundles/my-ag
 
 # Pack everything and create a .tar.gz archive
 pn pack --all --archive --path ~/.pi/agent
+
+# Pack, archive, and ENCRYPT the whole archive (opt-in, prompts for a passphrase)
+pn pack --all --archive --encrypt-archive --path ~/.pi/agent
+
+# Decrypt the archive on the receiving machine, then extract it
+pn decrypt my-agent.tar.gz.enc
 
 # Check bundle freshness vs. the local harness
 pn diff . --path ~/.pi/agent
@@ -109,6 +116,7 @@ agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the f
 
 **Highlights:**
 - Secrets encrypted with AES-256-GCM + Argon2id (documented, versioned parameters)
+- Optional **whole-archive encryption**: `pn pack --archive --encrypt-archive` wraps the entire `.tar.gz` (session memory included) in the *same* versioned AES-256-GCM + Argon2id envelope as bundle secrets — no second scheme; decrypt with `pn decrypt <file.enc>`. **Opt-in by default**: plain `.tar.gz` archives stay the default because encryption needs an interactive passphrase (breaking scripted `--archive` runs) and adds passphrase management — secrets are encrypted inside the archive either way
 - Deterministic SHA-256 payload digest covering every payload file, including `secrets/keys.enc`
 - Ed25519 signing over canonical manifest JSON; verification uses the bundled public key (portable)
 - **`pn run` refuses to launch** unless payload integrity and the manifest signature verify

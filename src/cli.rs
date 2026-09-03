@@ -67,6 +67,8 @@ pub enum Commands {
             pn pack --with-config --with-skills --path ~/.pi/agent\n\
         \n  Pack and create a .tar.gz archive:\n    \
             pn pack --all --archive --path ~/.pi/agent\n\
+        \n  Pack, archive, and encrypt the whole archive:\n    \
+            pn pack --all --archive --encrypt-archive --path ~/.pi/agent\n\
         \n  Force overwrite existing files:\n    \
             pn pack --with-config --path ~/.pi/agent --force")]
     Pack {
@@ -108,6 +110,17 @@ pub enum Commands {
         /// Overwrite existing files in the bundle
         #[arg(long)]
         force: bool,
+    },
+
+    /// Decrypt an encrypted archive produced by `pn pack --archive --encrypt-archive`
+    #[command(after_help = "EXAMPLES:\n\
+        \n  Decrypt an encrypted archive back to .tar.gz:\n    \
+            pn decrypt my-agent.tar.gz.enc\n\
+        \n  Then extract it:\n    \
+            tar xzf my-agent.tar.gz")]
+    Decrypt {
+        /// Path to the encrypted archive (.tar.gz.enc)
+        file: String,
     },
 
     /// Launch the agent defined in the bundle

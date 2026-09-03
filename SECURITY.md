@@ -59,6 +59,7 @@ accept before running a bundle.
 | **Bundle theft without passphrase** | Secrets encrypted with AES-256-GCM + Argon2id (m=64MiB, t=3, p=4, salt=16B). Without the passphrase, secrets are unreadable. |
 | **Accidental secret exposure on disk** | `keys.enc` created with 0600 permissions (owner-only). Keypair stored with 0600 permissions. Plaintext secrets are never written to disk or to manifest.yaml. |
 | **Secret-source files leaking as plaintext during pack** | Each harness declares its secret sources (`auth.json`, `.env`-style files, `secrets/` dirs) as `SecretSource` components; Core never copies secret-source files as plaintext (a filename-level policy backs this up) and writes only the encrypted `secrets/keys.enc`. |
+| **Whole-archive disclosure (session memory, config, skills)** | `pn pack --archive --encrypt-archive` produces a `.tar.gz.enc`: the entire archive — session memory included — is encrypted with the **same versioned AES-256-GCM + Argon2id envelope** as `secrets/keys.enc` (crypto format v1, no new parameters). `pn decrypt <file.enc>` restores the `.tar.gz`. |
 | **Unauthorized bundle modification** | `pn run` refuses to execute unless payload integrity **and** the manifest signature verify. |
 | **Payload tampering (config, skills, extensions, themes, memory, keys.enc)** | Every payload file is covered by the deterministic SHA-256 payload digest stored in the manifest. Add/modify/delete any payload file → digest mismatch → run refuses. |
 | **Signature forgery / key swap** | Manifest signed with Ed25519 over the canonical manifest JSON. Modified manifest, corrupted signature, missing signature, replaced public key → verification fails → run refuses. |
@@ -126,6 +127,7 @@ validity or format compatibility.*
 | **Brute-force on keys.enc** | Argon2id makes this harder but not impossible. Use strong passphrases. |
 | **Core dump / swap leakage** | If the OS writes process memory to disk (core dump, swap), zeroized buffers may still contain traces. Consider disabling core dumps for sensitive operations. |
 | **Untrusted signers** | A bundle signed by an attacker's key verifies as valid. Signatures prove control of the matching private key, not identity or safety. Decide which keys you trust before running. |
+| **Plain `.tar.gz` archive contents (the default)** | Without `--encrypt-archive`, `pn pack --archive` writes an unencrypted `.tar.gz`: session memory and config are readable if the file leaks. Encryption is **opt-in** — it requires an interactive passphrase prompt (breaking scripted `--archive` runs) and turns the artifact into `.tar.gz.enc`, so plain archives stay the default for frictionless transfers. Secrets inside the archive remain encrypted either way. |
 | **Timing attacks on signature verification** | Ed25519 is constant-time by design, but the `verify()` wrapper does not guarantee constant-time comparison of the result. |
 
 ## Cryptographic Decisions
@@ -156,7 +158,7 @@ Any value outside the supported set is refused explicitly.
 
 1. **Use strong passphrases** — 12+ words, randomly generated
 2. **Don't use `--passphrase` in scripts** — use the interactive prompt
-3. **Don't store bundles with secrets on shared drives** without encryption
+3. **Don't store bundles with secrets on shared drives** without encryption — use `pn pack --archive --encrypt-archive` when the whole bundle (session memory included) must be protected in transit or at rest
 4. **Run `pn rekey` periodically** to rotate passphrases
 5. **Never run `--allow-unverified`** on bundles you do not fully control
 6. **Decide which signers you trust** — signatures prove private-key control, not identity or safety
