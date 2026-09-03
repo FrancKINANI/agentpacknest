@@ -70,6 +70,16 @@ pub fn execute(request: PackBundleRequest) -> Result<PackBundleResult> {
     println!("Source:     {}", env.source_root.display());
     println!();
 
+    // ── 4b. Validate every declared destination ────────────────────
+    // Core safety policy: destinations are bundle-relative paths that must
+    // stay inside the bundle. Absolute paths and parent traversal (`..`)
+    // are rejected before anything is copied — a misbehaving harness can
+    // describe resources, but it can never direct the copy outside the
+    // bundle root.
+    for component in &env.components {
+        validate_component_destination(&component.destination)?;
+    }
+
     // ── 5. Load ignore patterns ────────────────────────────────────
     let ignore = IgnorePatterns::load(&env.source_root);
     if !ignore.is_empty() {
@@ -354,6 +364,42 @@ fn is_excluded_path(rel: &str, excluded: &[String]) -> bool {
     is_secret_source_file(filename)
 }
 
+/// Validate a harness-declared bundle destination before anything is copied.
+///
+/// Core policy: destinations are bundle-relative paths inside the bundle.
+/// Rejected: empty paths, absolute paths (including Windows prefixes like
+/// `C:`), root paths, and any `..` (parent traversal) segment.
+fn validate_component_destination(dest: &Path) -> Result<()> {
+    use std::path::Component;
+
+    if dest.as_os_str().is_empty() {
+        bail!("component destination is empty — harness bug");
+    }
+    if dest.is_absolute() {
+        bail!(
+            "component destination must be bundle-relative, got absolute path '{}'\n  \
+             hint: this is a harness bug — report it",
+            dest.display()
+        );
+    }
+    for component in dest.components() {
+        match component {
+            Component::ParentDir => bail!(
+                "component destination escapes the bundle (contains '..'): '{}'\n  \
+                 hint: this is a harness bug — report it",
+                dest.display()
+            ),
+            Component::Prefix(_) | Component::RootDir => bail!(
+                "component destination must be bundle-relative, got '{}'\n  \
+                 hint: this is a harness bug — report it",
+                dest.display()
+            ),
+            Component::CurDir | Component::Normal(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// True when a filename is a secret-source file that must never be copied
 /// as plaintext. This is Core policy, applied to every plaintext copy.
 fn is_secret_source_file(filename: &str) -> bool {
@@ -628,6 +674,95 @@ mod tests {
             .is_file());
         assert!(!bundle_dir.path().join("agent/config").exists());
         assert!(!bundle_dir.path().join("agent/packages/auth.json").exists());
+    }
+
+    #[test]
+    fn destination_validation_rejects_absolute_paths() {
+        // On Unix a leading `/` is absolute; on Windows a drive prefix is.
+        let bad_paths: Vec<&str> = {
+            #[cfg(windows)]
+            {
+                vec!["/etc/passwd", "/agent/config", "C:\\evil"]
+            }
+            #[cfg(not(windows))]
+            {
+                vec!["/etc/passwd", "/agent/config"]
+            }
+        };
+        for bad in bad_paths {
+            let err = validate_component_destination(Path::new(bad))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("must be bundle-relative"),
+                "{} should be rejected as absolute: {}",
+                bad,
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn destination_validation_rejects_parent_traversal() {
+        for bad in ["../escape", "agent/../../outside", "a/../.."] {
+            let err = validate_component_destination(Path::new(bad))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("escapes the bundle"),
+                "{} should be rejected as traversal: {}",
+                bad,
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn destination_validation_rejects_empty() {
+        let err = validate_component_destination(Path::new(""))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("destination is empty"), "{}", err);
+    }
+
+    #[test]
+    fn destination_validation_accepts_bundle_relative_paths() {
+        for good in [
+            "agent/config",
+            "agent/memory",
+            "agent/packages/skills",
+            "secrets/keys.enc",
+        ] {
+            assert!(
+                validate_component_destination(Path::new(good)).is_ok(),
+                "{} should be accepted",
+                good
+            );
+        }
+    }
+
+    #[test]
+    fn discovered_pi_components_have_valid_destinations() {
+        // Every destination the Pi harness declares must pass Core validation.
+        let pi_dir = TempDir::new().unwrap();
+        fake_pi(pi_dir.path());
+
+        let registry = HarnessRegistry::with_defaults();
+        let ctx = HarnessContext::new(Some(pi_dir.path().to_path_buf()));
+        let env = registry
+            .discover(crate::domain::harness::HarnessId::Pi, &ctx)
+            .unwrap();
+
+        assert!(!env.components.is_empty());
+        for component in &env.components {
+            validate_component_destination(&component.destination).unwrap_or_else(|e| {
+                panic!(
+                    "invalid destination {}: {}",
+                    component.destination.display(),
+                    e
+                )
+            });
+        }
     }
 
     #[test]

@@ -4,6 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::manifest;
+use crate::harness::registry::HarnessRegistry;
+use crate::harness::traits::HarnessContext;
 
 /// Execute `pn diff`.
 pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> {
@@ -35,9 +37,19 @@ pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> 
     println!();
 
     // ── 2. Resolve harness source ──────────────────────────────────
+    // The harness itself knows where its installation lives: when no `--path`
+    // is given, resolve it through the harness's own `detect()` (env vars,
+    // home dir, version — all harness vocabulary), never duplicated here.
     let harness_path = match path {
         Some(p) => PathBuf::from(p),
-        None => resolve_harness_path(&m.harness.name)?,
+        None => {
+            let registry = HarnessRegistry::with_defaults();
+            let harness = registry.by_name(&m.harness.name)?;
+            let detected = harness
+                .detect(&HarnessContext::new(None))
+                .context("failed to auto-detect the harness installation\n  hint: pass --path to specify the harness location")?;
+            detected.root
+        }
     };
 
     if !harness_path.is_dir() {
@@ -161,40 +173,6 @@ pub fn execute(bundle_path: Option<String>, path: Option<String>) -> Result<()> 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn resolve_harness_path(harness_name: &str) -> Result<PathBuf> {
-    match harness_name {
-        "pi" => {
-            // Check PI_CODING_AGENT_DIR, then ~/.pi/agent, then PI_HOME, then ~/.pi
-            if let Ok(val) = std::env::var("PI_CODING_AGENT_DIR") {
-                let p = PathBuf::from(&val);
-                if p.is_dir() {
-                    return Ok(p);
-                }
-            }
-            if let Some(home) = dirs::home_dir() {
-                let p = home.join(".pi").join("agent");
-                if p.is_dir() {
-                    return Ok(p);
-                }
-            }
-            if let Ok(val) = std::env::var("PI_HOME") {
-                let p = PathBuf::from(&val);
-                if p.is_dir() {
-                    return Ok(p);
-                }
-            }
-            if let Some(home) = dirs::home_dir() {
-                let p = home.join(".pi");
-                if p.is_dir() {
-                    return Ok(p);
-                }
-            }
-            bail!("could not find Pi installation\n  hint: pass --path explicitly")
-        }
-        _ => bail!("unsupported harness for auto-detection: {}", harness_name),
-    }
-}
 
 fn collect_bundle_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();

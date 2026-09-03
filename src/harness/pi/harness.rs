@@ -147,22 +147,24 @@ impl Harness for PiHarness {
         check_node_version(20)?;
 
         // Resolve the launch spec. Manifests created by `pn init` carry
-        // structured args; legacy manifests may embed args in the command
-        // string — split them the same way run v0.1.x did.
+        // structured args; legacy (schema 0.1) manifests may embed args in
+        // the command string. When that happens the command is reduced to the
+        // executable name and the embedded args are split out, so the final
+        // PreparedRuntime keeps the executable and its arguments structurally
+        // separated (never `Command::new("pi --agent-dir agent")`).
+        let mut command = request.launch.command.clone();
         let args: Vec<String> = if request.launch.args.is_empty() {
-            request
-                .launch
-                .command
-                .split_whitespace()
-                .skip(1)
-                .map(String::from)
-                .collect()
+            let mut parts: Vec<String> = command.split_whitespace().map(String::from).collect();
+            if !parts.is_empty() {
+                command = parts.remove(0);
+            }
+            parts
         } else {
             request.launch.args.clone()
         };
 
         Ok(PreparedRuntime {
-            command: request.launch.command.clone(),
+            command,
             args,
             working_directory: request.launch.working_directory.clone(),
         })
