@@ -58,7 +58,7 @@ accept before running a bundle.
 |---|---|
 | **Bundle theft without passphrase** | Secrets encrypted with AES-256-GCM + Argon2id (m=64MiB, t=3, p=4, salt=16B). Without the passphrase, secrets are unreadable. |
 | **Accidental secret exposure on disk** | `keys.enc` created with 0600 permissions (owner-only). Keypair stored with 0600 permissions. Plaintext secrets are never written to disk or to manifest.yaml. |
-| **Secret-source files leaking as plaintext during pack** | `auth.json`, `.env`-style files, and `secrets/` directories are excluded from plaintext component copies — secrets only ever exist in the bundle encrypted. |
+| **Secret-source files leaking as plaintext during pack** | Each harness declares its secret sources (`auth.json`, `.env`-style files, `secrets/` dirs) as `SecretSource` components; Core never copies secret-source files as plaintext (a filename-level policy backs this up) and writes only the encrypted `secrets/keys.enc`. |
 | **Unauthorized bundle modification** | `pn run` refuses to execute unless payload integrity **and** the manifest signature verify. |
 | **Payload tampering (config, skills, extensions, themes, memory, keys.enc)** | Every payload file is covered by the deterministic SHA-256 payload digest stored in the manifest. Add/modify/delete any payload file → digest mismatch → run refuses. |
 | **Signature forgery / key swap** | Manifest signed with Ed25519 over the canonical manifest JSON. Modified manifest, corrupted signature, missing signature, replaced public key → verification fails → run refuses. |

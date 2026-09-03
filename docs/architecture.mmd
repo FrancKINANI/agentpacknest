@@ -36,7 +36,7 @@ graph TD
     HARNESS_AIDER[harness/aider/<br/>harness.rs, paths.rs, launch.rs]
     HARNESS_REG[harness/registry.rs]
 
-    HARNESS[Harness Layer<br/>Adapter implementations:<br/>Pi = production<br/>Aider = skeleton (detection only)<br/>Core knows trait only]
+    HARNESS[Harness Layer<br/>Contract: detect/discover/<br/>prepare_runtime (traits.rs)<br/>Pi = production<br/>Aider = skeleton (detection only)<br/>Core resolves via registry only]
 
     %% Infrastructure Layer
     INFRA_FS[infrastructure/filesystem.rs]
@@ -77,8 +77,8 @@ graph TD
 
     SEC -.->|zero deps| NONE
 
-    %% Remaining deviations (v0.1.2)
-    DEVIATION1[DEVIATION:<br/>commands/init.rs does<br/>orchestration (no application<br/>layer use case yet)]
+    %% Remaining deviations (v0.2)
+    DEVIATION1[DEVIATION:<br/>commands/init.rs scaffolds dirs<br/>+ writes manifest at command<br/>layer — no application init use<br/>case yet]
     DEVIATION2[DEVIATION:<br/>commands/pack.rs owns<br/>--archive creation<br/>(crypto prompt + tar.gz)]
     DEVIATION3[DEVIATION:<br/>commands/info.rs, unlock.rs,<br/>rekey.rs touch security/domain<br/>directly — no application layer]
 
@@ -108,7 +108,7 @@ graph TD
 
 ---
 
-### Status (v0.1.2)
+### Status (v0.1.2 / v0.2 corrections)
 
 **Fixed during v0.1.1/v0.1.2:**
 
@@ -117,12 +117,18 @@ graph TD
 3. ~~Vestigial `application/init_bundle.rs`~~ — deleted (was uncompiled dead code referencing a nonexistent `Application` type).
 4. ~~Bundle-root `launch` placeholder script~~ — no longer created by `pn init` (v0.1.2); launching is defined by `manifest.launch` only.
 
+**Fixed during v0.2 corrections (single live Harness contract):**
+
+1. ~~Two parallel abstractions (`harness/types.rs` `HarnessAdapter` + `harness/traits.rs` `Harness`)~~ — `types.rs` deleted; one contract in `harness/traits.rs` (detect/discover/prepare_runtime) implemented by `harness/pi/harness.rs` and the aider scaffold.
+2. ~~`application/pack_bundle.rs` hardcodes Pi paths / exclusion lists / packages structure~~ — pack now consumes `PortableEnvironment` from the registry; Pi vocabulary lives in `PiHarness::discover()`.
+3. ~~`application/run_bundle_impl.rs` branches on `harness.name == "pi"` for the Node.js check~~ — runtime preflight goes through registry `prepare_runtime()`.
+4. ~~`commands/init.rs` / `commands/pack.rs` detect via `PiInstallation` directly~~ — detection resolves through the `HarnessRegistry`; `PiInstallation` is internal to `harness/pi/`.
+
 **Remaining deviations (tracked for v0.2):**
 
-1. **`commands/init.rs`** does orchestration directly (Pi detection, directory scaffolding, manifest write) — there is no application-layer `init` use case yet.
+1. **`commands/init.rs`** still does orchestration at the command layer (directory scaffolding, manifest write) — there is no application-layer `init` use case yet.
 2. **`commands/pack.rs`** still owns `--archive`/`--encrypt-archive` creation (tar.gz + passphrase prompt) after the application-layer pack succeeds.
 3. **`commands/info.rs`, `commands/unlock.rs`, `commands/rekey.rs`** read manifests and touch crypto/domain directly instead of going through application-layer use cases.
-4. **Harness Pi paths** — Pi-specific paths are acceptable inside the Pi adapter, but `commands/init.rs` and `commands/pack.rs` must not hardcode them once a second harness ships.
 
 ---
 

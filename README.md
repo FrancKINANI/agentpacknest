@@ -145,9 +145,14 @@ agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the f
 | Claude Code | 📋 Planned | — |
 | Codex | 📋 Planned | — |
 
-The `Harness` trait, registry, and Pi/Aider adapters exist in the codebase
-(`src/harness/`) but only Pi is wired through `pn init`/`pn pack`/`pn run`
-end-to-end. Aider support is the target of v0.2.
+AgentPackNest drives every harness through one contract (`src/harness/traits.rs`):
+`detect` (is it installed, where, what version) → `discover` (which resources
+form its portable environment) → `prepare_runtime` (runtime prerequisites +
+final launch spec). Pi is fully wired through `pn init`/`pn pack`/`pn run`
+on this abstraction — all Pi layout knowledge (config/memory/packages/secret
+sources, Node ≥ 20) is declared by the Pi harness, never hardcoded in the
+application layer. Aider is the detection-only skeleton; wiring it end-to-end
+on the same contract is the target of v0.2.
 
 ## Roadmap
 
