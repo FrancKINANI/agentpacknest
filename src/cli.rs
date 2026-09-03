@@ -23,6 +23,8 @@ use clap::{Parser, Subcommand};
             pn run . --dry-run\n\
         \n  Run the agent:\n    \
             pn run .\n\
+        \n  Run with --allow-unverified (not recommended):\n    \
+            pn run . --allow-unverified\n\
         \n  Inspect encrypted secrets (masked):\n    \
             pn unlock ."
 )]
@@ -117,7 +119,9 @@ pub enum Commands {
         \n  Run with a custom working directory:\n    \
             pn run . --workdir /tmp/agent-workspace\n\
         \n  Pass the passphrase via flag (less secure):\n    \
-            pn run . --passphrase my-secret")]
+            pn run . --passphrase my-secret\n\
+        \n  Run without integrity/sig verification (not recommended):\n    \
+            pn run . --allow-unverified")]
     Run {
         /// Path to the bundle directory (default: current dir)
         bundle: Option<String>,
@@ -133,6 +137,10 @@ pub enum Commands {
         /// Show what would be executed without running
         #[arg(long)]
         dry_run: bool,
+
+        /// Allow running without integrity/sig verification (NOT RECOMMENDED)
+        #[arg(long)]
+        allow_unverified: bool,
 
         /// Extra arguments passed to the agent command
         #[arg(trailing_var_arg = true)]

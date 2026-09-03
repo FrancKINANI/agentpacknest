@@ -3,7 +3,6 @@
 //! These tests exercise the full lifecycle: init → pack → info → diff.
 //! They use a fake Pi installation fixture to avoid requiring a real Pi install.
 
-use std::fs;
 use std::path::PathBuf;
 
 /// Get the path to the fake Pi fixture.
