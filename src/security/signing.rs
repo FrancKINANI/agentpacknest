@@ -279,6 +279,17 @@ mod tests {
         assert_eq!(pubkey, vk.to_bytes());
     }
 
+    /// Build a signed bundle context: sign `manifest` with the real keypair
+    /// and lay out manifest.sig + signing/public.key under `dir`.
+    fn sign_into_bundle(dir: &Path, manifest: &crate::domain::manifest::Manifest) {
+        let sig = sign_canonical_manifest(manifest).unwrap();
+        let sig_path = dir.join("manifest.sig");
+        let pubkey_path = dir.join("signing/public.key");
+        fs::create_dir_all(pubkey_path.parent().unwrap()).unwrap();
+        save_signature(&sig_path, &sig).unwrap();
+        save_public_key(dir).unwrap();
+    }
+
     #[test]
     fn canonical_json_signing_roundtrip() {
         ensure_keypair();
@@ -302,5 +313,166 @@ mod tests {
         let verified =
             verify_manifest_with_bundled_pubkey(&manifest, &sig_path, &pubkey_path).unwrap();
         assert!(verified);
+    }
+
+    // ── Portable verification (Milestone 4) ───────────────────────────
+    //
+    // Signing context A produces a bundle; a fresh verification context B
+    // verifies it using ONLY the public key that traveled with the bundle.
+    // B never needs Machine A's private key.
+
+    #[test]
+    fn portable_verification_uses_only_bundled_pubkey() {
+        ensure_keypair();
+
+        // Context A: sign a manifest and write bundle artifacts.
+        let mut manifest = crate::domain::manifest::default_pi("portable-agent", "0.1.0");
+        manifest.bundle.id = "f47ac10b-58cc-4372-a567-0e02b2c3d479".to_string();
+        manifest.bundle.created_at = "2025-01-15T12:00:00Z".to_string();
+
+        let dir_a = TempDir::new().unwrap();
+        sign_into_bundle(dir_a.path(), &manifest);
+
+        // Context B: a fresh machine with no access to the private key.
+        // Verification must succeed using the bundled artifacts alone.
+        let sig_path = dir_a.path().join("manifest.sig");
+        let pubkey_path = dir_a.path().join("signing/public.key");
+        let verified = verify_manifest_with_bundled_pubkey(&manifest, &sig_path, &pubkey_path);
+        assert!(verified.unwrap());
+    }
+
+    // ── Signature attack matrix (Milestone 6) ─────────────────────────
+
+    fn attack_bundle() -> (TempDir, crate::domain::manifest::Manifest) {
+        ensure_keypair();
+        let mut manifest = crate::domain::manifest::default_pi("attack-agent", "0.1.0");
+        manifest.bundle.id = "f47ac10b-58cc-4372-a567-0e02b2c3d479".to_string();
+        manifest.bundle.created_at = "2025-01-15T12:00:00Z".to_string();
+        let dir = TempDir::new().unwrap();
+        sign_into_bundle(dir.path(), &manifest);
+        (dir, manifest)
+    }
+
+    #[test]
+    fn attack_valid_manifest_and_signature_succeeds() {
+        let (dir, manifest) = attack_bundle();
+        let verified = verify_manifest_with_bundled_pubkey(
+            &manifest,
+            &dir.path().join("manifest.sig"),
+            &dir.path().join("signing/public.key"),
+        )
+        .unwrap();
+        assert!(verified);
+    }
+
+    #[test]
+    fn attack_modified_manifest_fails() {
+        let (dir, manifest) = attack_bundle();
+        let mut tampered = manifest.clone();
+        tampered.bundle.name = "evil-agent".to_string();
+
+        let verified = verify_manifest_with_bundled_pubkey(
+            &tampered,
+            &dir.path().join("manifest.sig"),
+            &dir.path().join("signing/public.key"),
+        )
+        .unwrap();
+        assert!(!verified, "modified manifest must fail verification");
+    }
+
+    #[test]
+    fn attack_modified_signature_fails() {
+        let (dir, manifest) = attack_bundle();
+        let sig_path = dir.path().join("manifest.sig");
+        let mut sig = fs::read(&sig_path).unwrap();
+        sig[0] ^= 0xff; // flip a byte in the signature
+        fs::write(&sig_path, &sig).unwrap();
+
+        let verified = verify_manifest_with_bundled_pubkey(
+            &manifest,
+            &sig_path,
+            &dir.path().join("signing/public.key"),
+        )
+        .unwrap();
+        assert!(!verified, "corrupted signature must fail verification");
+    }
+
+    #[test]
+    fn attack_missing_signature_errors() {
+        let (dir, manifest) = attack_bundle();
+        fs::remove_file(dir.path().join("manifest.sig")).unwrap();
+
+        let result = verify_manifest_with_bundled_pubkey(
+            &manifest,
+            &dir.path().join("manifest.sig"),
+            &dir.path().join("signing/public.key"),
+        );
+        assert!(result.is_err(), "missing signature file must error cleanly");
+    }
+
+    #[test]
+    fn attack_malformed_signature_errors() {
+        let (dir, manifest) = attack_bundle();
+        let sig_path = dir.path().join("manifest.sig");
+        fs::write(&sig_path, b"too-short").unwrap();
+
+        let result = verify_manifest_with_bundled_pubkey(
+            &manifest,
+            &sig_path,
+            &dir.path().join("signing/public.key"),
+        );
+        let err = result.expect_err("wrong-length signature must error, not verify");
+        assert!(err.to_string().contains("invalid signature"));
+    }
+
+    #[test]
+    fn attack_missing_public_key_errors() {
+        let (dir, manifest) = attack_bundle();
+        fs::remove_file(dir.path().join("signing/public.key")).unwrap();
+
+        let result = verify_manifest_with_bundled_pubkey(
+            &manifest,
+            &dir.path().join("manifest.sig"),
+            &dir.path().join("signing/public.key"),
+        );
+        assert!(result.is_err(), "missing public key must error cleanly");
+    }
+
+    #[test]
+    fn attack_malformed_public_key_errors() {
+        let (dir, manifest) = attack_bundle();
+        let pubkey_path = dir.path().join("signing/public.key");
+        fs::write(&pubkey_path, b"not-a-key").unwrap();
+
+        let result = verify_manifest_with_bundled_pubkey(
+            &manifest,
+            &dir.path().join("manifest.sig"),
+            &pubkey_path,
+        );
+        let err = result.expect_err("wrong-length public key must error, not verify");
+        assert!(err.to_string().contains("invalid public key"));
+    }
+
+    #[test]
+    fn attack_replaced_public_key_fails() {
+        let (dir, manifest) = attack_bundle();
+
+        // Replace the bundled public key with a DIFFERENT valid key
+        // (as if an attacker swapped keys), keeping the original signature.
+        let mut rng = rand::thread_rng();
+        let attacker = SigningKey::generate(&mut rng);
+        let pubkey_path = dir.path().join("signing/public.key");
+        fs::write(&pubkey_path, attacker.verifying_key().to_bytes()).unwrap();
+
+        let verified = verify_manifest_with_bundled_pubkey(
+            &manifest,
+            &dir.path().join("manifest.sig"),
+            &pubkey_path,
+        )
+        .unwrap();
+        assert!(
+            !verified,
+            "signature signed by the original key must not verify under a replaced key"
+        );
     }
 }
