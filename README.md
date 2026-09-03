@@ -110,6 +110,38 @@ How the agent starts is defined **in the manifest** (`launch.command` +
 bundle. `pn run` refuses to launch unless the payload digest and the manifest
 signature verify.
 
+## Excluding files from a bundle
+
+Drop a `.agentpacknestignore` file in the **harness source directory** you
+pack from (the `--path` given to `pn pack`, e.g.
+`~/.pi/agent/.agentpacknestignore`) to keep bulky caches, logs, or other
+non-portable files out of the bundle:
+
+```gitignore
+# .agentpacknestignore — .gitignore-style, one pattern per line
+node_modules    # any file or directory named `node_modules`, at any depth
+cache
+*.log           # any file whose name ends in .log
+/tmp            # leading / anchors the match to the top of a packed component
+# comments and blank lines are ignored
+```
+
+Matching rules (a simplified `.gitignore`):
+
+- A bare name (`cache`) matches any **file or directory segment** with that
+  name at any depth.
+- `*.ext` matches any file whose name ends in `.ext`.
+- A leading `/` anchors the pattern to the top of a component's source
+  directory.
+- Patterns are matched against each file's path **within the component being
+  packed** — files that land in `agent/memory/` are matched by their name
+  there (e.g. `*.jsonl` skips old session dumps; a `sessions` pattern never
+  matches because only *contents* of the source sessions dir are copied).
+
+`pn pack` prints `Ignore: N pattern(s) from .agentpacknestignore` when the
+file is present. Secret-source files (`auth.json`, `.env`, …) can never be
+re-included by an ignore file — Core refuses to copy them as plaintext.
+
 ## Security
 
 agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the full threat model.

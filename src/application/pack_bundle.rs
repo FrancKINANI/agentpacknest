@@ -658,6 +658,50 @@ mod tests {
     }
 
     #[test]
+    fn pack_respects_agentpacknestignore_at_source_root() {
+        // A real .agentpacknestignore at the harness source root must exclude
+        // matching files from every component copied into the bundle.
+        let pi_dir = TempDir::new().unwrap();
+        fake_pi(pi_dir.path());
+
+        // Extra content that should be ignored: a loose .tmp file, a cache
+        // directory (ignored by name), and a log inside sessions/.
+        fs::write(pi_dir.path().join("scratch.tmp"), "tmp").unwrap();
+        fs::create_dir_all(pi_dir.path().join("cache")).unwrap();
+        fs::write(pi_dir.path().join("cache/old.json"), "{}").unwrap();
+        fs::write(pi_dir.path().join("sessions/debug.log"), "log").unwrap();
+
+        fs::write(
+            pi_dir.path().join(".agentpacknestignore"),
+            "# bulky caches and logs\n*.tmp\ncache\n*.log\n",
+        )
+        .unwrap();
+
+        let bundle_dir = TempDir::new().unwrap();
+        init_bundle(bundle_dir.path(), "ignore-agent");
+        run_pack(
+            bundle_dir.path(),
+            pi_dir.path(),
+            vec![("config", true), ("memory", true)],
+        );
+
+        // Kept: loose config + real session history.
+        assert!(bundle_dir
+            .path()
+            .join("agent/config/settings.json")
+            .is_file());
+        assert!(bundle_dir
+            .path()
+            .join("agent/memory/2025-01-15.jsonl")
+            .is_file());
+
+        // Excluded by the ignore file: *.tmp, any `cache` segment, *.log.
+        assert!(!bundle_dir.path().join("agent/config/scratch.tmp").exists());
+        assert!(!bundle_dir.path().join("agent/config/cache").exists());
+        assert!(!bundle_dir.path().join("agent/memory/debug.log").exists());
+    }
+
+    #[test]
     fn pack_with_skills_copies_packages_only() {
         let pi_dir = TempDir::new().unwrap();
         fake_pi(pi_dir.path());
