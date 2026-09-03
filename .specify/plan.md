@@ -2,7 +2,7 @@
 
 **Version**: v0.1.1
 **Branch**: staging
-**Status**: Plan created
+**Status**: **SUPERSEDED** — v0.1.1/v0.1.2 work is shipped (see `docs/bundle-format.md`, the authoritative spec). The current working plan for harness work lives in `specs/main/plan.md`. This file is kept as historical record.
 
 ## Summary
 Make the existing v0.1 implementation trustworthy, thoroughly tested, internally coherent, and complete the architectural groundwork that already exists.

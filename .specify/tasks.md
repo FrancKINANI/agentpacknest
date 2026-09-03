@@ -1,5 +1,7 @@
 # Tasks: AgentPackNest v0.1.1 — Correctness, Security, Testing & Architecture Completion
 
+> **SUPERSEDED** — v0.1.1/v0.1.2 work is shipped. The current task list for harness work lives in `specs/main/tasks.md`. This file is kept as historical record.
+
 ## Phase 0: Foundation & Baseline
 
 ### T001 [P] [P0] Create fake Pi fixture and test infrastructure
