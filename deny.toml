@@ -1,0 +1,51 @@
+# cargo-deny configuration — https://embarkstudios.github.io/cargo-deny/
+# Run locally with `cargo deny check` (or `bacon deny`).
+
+[graph]
+# Restrict the dependency graph to the platforms this project ships on so
+# OS-specific crates don't report spurious license/advisory findings.
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
+]
+
+[advisories]
+# A yanked release is a supply-chain signal we want to fail on.
+yanked = "deny"
+# Only flag unmaintained/unsound crates that we depend on directly.
+unmaintained = "workspace"
+unsound = "workspace"
+ignore = []
+
+[licenses]
+confidence-threshold = 0.8
+# Permissive licenses only. This is the closure of every SPDX expression in
+# the current dependency tree; add to it deliberately, never by reflex.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+
+[bans]
+# Duplicate versions are noisy but not fatal; wildcards are never acceptable.
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+# Only crates.io is trusted; git dependencies must be allow-listed explicitly.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

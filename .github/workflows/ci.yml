@@ -70,3 +70,46 @@ jobs:
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+          manifest-path: ./Cargo.toml
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    # Runs on the runner rather than the tarpaulin container: the CLI tests
+    # exercise `pn run`, which requires the Node.js toolchain the runner
+    # provides.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-tarpaulin
+      - name: Generate coverage
+        run: cargo tarpaulin --config tarpaulin.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: target/tarpaulin/
+
+  docker:
+    name: Docker (cargo-chef)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

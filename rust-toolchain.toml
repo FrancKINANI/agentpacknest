@@ -1,0 +1,6 @@
+[toolchain]
+# AgentPackNest tracks the stable channel, matching .mise.toml and CI.
+# rustup installs this toolchain (and the components below) automatically.
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

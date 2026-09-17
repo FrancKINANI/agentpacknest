@@ -1,0 +1,9 @@
+# Build context exclusions for the cargo-chef Dockerfile.
+target
+.git
+.github
+.specify
+specs
+docs
+recipe.json
+*.md

@@ -238,6 +238,23 @@ as of v0.1.2 — v0.2 changed nothing about them.
 3. Work on `staging`, merge to `main` after CI passes
 4. All changes must pass: `cargo clippy -D warnings`, `cargo fmt --check`, `cargo test`
 
+### Tooling
+
+All tool configuration lives at the repository root:
+
+| File | Purpose |
+|---|---|
+| `rust-toolchain.toml` | Pins the `stable` channel with `rustfmt` + `clippy` |
+| `rustfmt.toml` | Formatting options (stable-only, so `cargo fmt` matches CI) |
+| `bacon.toml` | `bacon` jobs mirroring CI — `c` clippy, `t` test, `f` fmt, `shift`+`d` deny |
+| `deny.toml` | `cargo-deny` policy: advisories, licenses, bans, sources |
+| `tarpaulin.toml` | `cargo-tarpaulin` coverage settings (reported, not enforced) |
+| `Dockerfile`, `.dockerignore` | Multi-stage image built with `cargo-chef` caching |
+
+CI runs `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`,
+`cargo build --release`, `cargo-audit` (RustSec), `cargo-deny`,
+`cargo-tarpaulin` coverage, and the cached Docker build.
+
 ## License
 
 MIT
