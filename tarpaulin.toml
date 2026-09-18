@@ -1,0 +1,18 @@
+# cargo-tarpaulin configuration — https://github.com/xd009642/tarpaulin
+#
+# Every top-level table other than [report] is a coverage run; the reserved
+# [report] table only shapes how results are written.
+
+[coverage]
+manifest-path = "Cargo.toml"
+all-features = true
+run-types = ["AllTargets"]
+skip-clean = true
+output-dir = "target/tarpaulin"
+test-timeout = "10m"
+# Coverage is reported, not enforced — CI uploads the artifact instead of
+# failing the build. To gate merges, set `fail-under = <percent>` here.
+
+[report]
+out = ["Xml", "Lcov", "Html"]
+output-dir = "target/tarpaulin"

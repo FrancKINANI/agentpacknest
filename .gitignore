@@ -1,5 +1,7 @@
 /target
+recipe.json
 *.swp
 *.swo
 *~
 .DS_Store
+.specify/

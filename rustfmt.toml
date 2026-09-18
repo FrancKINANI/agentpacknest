@@ -1,0 +1,6 @@
+# Only stable, non-nightly rustfmt options are used here so `cargo fmt`
+# behaves identically on the pinned stable toolchain (see rust-toolchain.toml).
+edition = "2021"
+max_width = 100
+newline_style = "Unix"
+tab_spaces = 4

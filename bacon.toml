@@ -1,0 +1,42 @@
+#:schema https://dystroy.org/bacon/.bacon.schema.json
+
+# bacon configuration — https://dystroy.org/bacon/
+# `bacon` runs the default job in the background and re-runs it on save.
+# Switch jobs at runtime with `b` (or the keys below).
+default_job = "check"
+
+env.CARGO_TERM_COLOR = "always"
+
+[jobs.check]
+command = ["cargo", "check", "--all-features", "--color", "always"]
+need_stdout = false
+
+[jobs.clippy]
+command = [
+    "cargo", "clippy", "--all-targets", "--all-features", "--color", "always",
+    "--", "-D", "warnings",
+]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "test", "--all", "--color", "always"]
+need_stdout = true
+
+[jobs.fmt]
+command = ["cargo", "fmt", "--check"]
+need_stdout = true
+
+[jobs.deny]
+command = ["cargo", "deny", "check"]
+need_stdout = true
+
+[jobs.doc]
+command = ["cargo", "doc", "--no-deps", "--all-features"]
+need_stdout = false
+
+# Shortcuts for switching jobs (bacon keeps `d` for `cargo doc`).
+[keybindings]
+c = "job:clippy"
+t = "job:test"
+f = "job:fmt"
+shift-d = "job:deny"

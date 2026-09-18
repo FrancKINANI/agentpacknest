@@ -5,6 +5,9 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+/// Default freshness threshold: warn when a bundle is older than 7 days.
+pub const DEFAULT_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+
 /// Request to run a bundle.
 pub struct RunBundleRequest {
     pub bundle_path: PathBuf,
@@ -12,6 +15,9 @@ pub struct RunBundleRequest {
     pub workdir: Option<String>,
     pub dry_run: bool,
     pub allow_unverified: bool,
+    /// Freshness threshold in seconds; the command layer resolves
+    /// `--max-age` / `AGENTPACKNEST_MAX_AGE` / [`DEFAULT_MAX_AGE_SECS`].
+    pub max_age_secs: u64,
     pub args: Vec<String>,
 }
 
@@ -39,9 +45,11 @@ mod tests {
             workdir: None,
             dry_run: true,
             allow_unverified: false,
+            max_age_secs: DEFAULT_MAX_AGE_SECS,
             args: vec![],
         };
         assert!(request.dry_run);
         assert!(!request.allow_unverified);
+        assert_eq!(request.max_age_secs, 7 * 24 * 60 * 60);
     }
 }

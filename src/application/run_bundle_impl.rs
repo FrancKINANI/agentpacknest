@@ -43,7 +43,7 @@ pub fn execute(request: RunBundleRequest) -> Result<RunResult> {
     println!("Harness:  {} v{}", m.harness.name, m.harness.version);
 
     // ── 3. Check bundle freshness ──────────────────────────────────
-    check_stale_bundle(&m)?;
+    check_stale_bundle(&m, request.max_age_secs)?;
 
     // ── 4. Verify integrity and signature BEFORE execution ──────────
     // This is a security checkpoint: tampered bundles must not execute by default.
@@ -356,31 +356,50 @@ fn version_lt(a: &str, b: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Check if the bundle is stale compared to current time.
-/// Warns (does not block) if packed_at is older than 7 days.
-fn check_stale_bundle(m: &manifest::Manifest) -> Result<()> {
+/// Warns (does not block) when the bundle is older than `max_age_secs`
+/// (the default of 7 days is resolved in the command layer).
+fn check_stale_bundle(m: &manifest::Manifest, max_age_secs: u64) -> Result<()> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    if let Some(ref origin) = m.origin {
-        if let Ok(pack_secs) = parse_iso8601_secs(&origin.packed_at) {
-            let now_secs = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
 
-            let age_days = now_secs.saturating_sub(pack_secs) / 86400;
-
-            if age_days > 7 {
-                println!(
-                    "⚠ WARNING: this bundle was packed {} days ago on '{}'",
-                    age_days, origin.origin_machine
-                );
-                println!("  hint: the local harness may have changed since then.");
-                println!("  run `pn diff` to compare, or `pn pack` to refresh.");
-                println!();
-            }
+    if let Some(age_secs) = stale_age_secs(m, now_secs, max_age_secs) {
+        if let Some(ref origin) = m.origin {
+            println!(
+                "⚠ WARNING: this bundle was packed {} ago on '{}'",
+                format_age(age_secs),
+                origin.origin_machine
+            );
+            println!("  hint: the local harness may have changed since then.");
+            println!("  run `pn diff` to compare, or `pn pack` to refresh.");
+            println!();
         }
     }
     Ok(())
+}
+
+/// The bundle's age in seconds when it is older than `max_age_secs`;
+/// `None` when it is fresh enough, or when no origin timestamp is present
+/// or parseable.
+fn stale_age_secs(m: &manifest::Manifest, now_secs: u64, max_age_secs: u64) -> Option<u64> {
+    let origin = m.origin.as_ref()?;
+    let pack_secs = parse_iso8601_secs(&origin.packed_at).ok()?;
+    let age_secs = now_secs.saturating_sub(pack_secs);
+    (age_secs > max_age_secs).then_some(age_secs)
+}
+
+/// Human-friendly age for the staleness warning message.
+fn format_age(age_secs: u64) -> String {
+    if age_secs >= 86_400 {
+        format!("{} days", age_secs / 86_400)
+    } else if age_secs >= 3_600 {
+        format!("{} hours", age_secs / 3_600)
+    } else {
+        format!("{} minutes", (age_secs / 60).max(1))
+    }
 }
 
 /// Parse ISO 8601 timestamp to seconds since epoch.
@@ -535,9 +554,53 @@ mod tests {
             workdir: None,
             dry_run: true,
             allow_unverified: false,
+            max_age_secs: crate::application::run_bundle::DEFAULT_MAX_AGE_SECS,
             args: vec![],
         };
         assert!(request.dry_run);
         assert!(!request.allow_unverified);
+    }
+
+    // ── Staleness threshold ───────────────────────────────────────
+
+    /// Build a manifest whose origin is packed at a fixed past date.
+    fn manifest_packed_at(iso: &str) -> manifest::Manifest {
+        let mut m = manifest::default_pi("stale-test", "0.1.0");
+        m.origin = Some(manifest::OriginMeta {
+            origin_machine: "old-machine".to_string(),
+            packed_at: iso.to_string(),
+            source_state_hash: None,
+        });
+        m
+    }
+
+    #[test]
+    fn stale_beyond_threshold_reported() {
+        // Packed 245 days before the (fixed) reference clock.
+        let now = parse_iso8601_secs("2026-09-03T00:00:00Z").unwrap();
+        let m = manifest_packed_at("2026-01-01T00:00:00Z");
+        let age = now - parse_iso8601_secs("2026-01-01T00:00:00Z").unwrap();
+        assert_eq!(age, 245 * 86_400);
+
+        // Stale beyond the default 7 days.
+        assert_eq!(stale_age_secs(&m, now, 7 * 86_400), Some(245 * 86_400));
+        // Not stale when the threshold is raised past the age.
+        assert_eq!(stale_age_secs(&m, now, 400 * 86_400), None);
+        // Exactly at the threshold is not stale (strictly older than).
+        assert_eq!(stale_age_secs(&m, now, 245 * 86_400), None);
+    }
+
+    #[test]
+    fn no_origin_never_stale() {
+        let now = parse_iso8601_secs("2026-09-03T00:00:00Z").unwrap();
+        let m = manifest::default_pi("no-origin", "0.1.0");
+        assert_eq!(stale_age_secs(&m, now, 86_400), None);
+    }
+
+    #[test]
+    fn humanized_age_uses_largest_unit() {
+        assert_eq!(format_age(245 * 86_400), "245 days");
+        assert_eq!(format_age(12 * 3_600), "12 hours");
+        assert_eq!(format_age(30 * 60), "30 minutes");
     }
 }
