@@ -48,7 +48,7 @@ pn run .
 ## Commands
 
 | Command | What it does |
-|---|---|
+| --- | --- |
 | `pn init` | Create a new bundle from a harness installation |
 | `pn pack` | Copy config, memory, skills, secrets into the bundle |
 | `pn run` | Launch the agent defined in the bundle (warns when the bundle is stale) |
@@ -102,7 +102,7 @@ execution — and `pn diff` shows what changed in the local harness.
 
 ## Bundle structure
 
-```
+```bash
 my-agent/
 ├── manifest.yaml          # Metadata + payload integrity digest
 ├── manifest.sig           # Ed25519 signature over canonical manifest JSON
@@ -167,6 +167,7 @@ re-included by an ignore file — Core refuses to copy them as plaintext.
 agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the full threat model.
 
 **Highlights:**
+
 - Secrets encrypted with AES-256-GCM + Argon2id (documented, versioned parameters)
 - Optional **whole-archive encryption**: `pn pack --archive --encrypt-archive` wraps the entire `.tar.gz` (session memory included) in the *same* versioned AES-256-GCM + Argon2id envelope as bundle secrets — no second scheme; decrypt with `pn decrypt <file.enc>`. **Opt-in by default**: plain `.tar.gz` archives stay the default because encryption needs an interactive passphrase (breaking scripted `--archive` runs) and adds passphrase management — secrets are encrypted inside the archive either way
 - Deterministic SHA-256 payload digest covering every payload file, including `secrets/keys.enc`
@@ -188,7 +189,7 @@ agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the f
 - Runtime requirements
 - Provenance tracking
 
-```
+```bash
   Reproducibility
   ────────────────────────────────────────────
   Score        85%
@@ -199,7 +200,7 @@ agentpacknest takes security seriously. See [SECURITY.md](SECURITY.md) for the f
 ## Supported harnesses
 
 | Harness | Status | Notes |
-|---|---|---|
+| --- | --- | --- |
 | [Pi](https://pi.dev) | ✅ Full support | Detection, config, skills, memory, secrets (`auth.json`, `.env`, `secrets/`) |
 | [Aider](https://aider.chat) | 🔨 Skeleton | Binary/config detection scaffolded; `init`/`pack`/`run` not yet wired up |
 | Claude Code | 📋 Planned | — |
@@ -243,7 +244,7 @@ as of v0.1.2 — v0.2 changed nothing about them.
 All tool configuration lives at the repository root:
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | `rust-toolchain.toml` | Pins the `stable` channel with `rustfmt` + `clippy` |
 | `rustfmt.toml` | Formatting options (stable-only, so `cargo fmt` matches CI) |
 | `bacon.toml` | `bacon` jobs mirroring CI — `c` clippy, `t` test, `f` fmt, `shift`+`d` deny |
